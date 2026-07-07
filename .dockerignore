@@ -1,0 +1,28 @@
+node_modules
+**/node_modules
+dist
+**/dist
+dev-dist
+**/dev-dist
+coverage
+**/coverage
+
+# Never ship local databases or secrets into the image / build context.
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+**/*.db
+.env
+.env.*
+!.env.example
+
+.git
+.gitignore
+.DS_Store
+*.log
+
+# Docs are not needed at runtime.
+PLAN.md
+API_CONTRACT.md
+DECISIONS.md
