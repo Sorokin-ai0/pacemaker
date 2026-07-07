@@ -15,3 +15,5 @@
 | 11 | `bcrypt` (native) rather than `bcryptjs`; Docker base image `node:20-slim` (glibc) so prebuilt binaries work. | Spec names bcrypt explicitly; slim avoids alpine/musl native-module friction. |
 | 12 | Demo credentials: `demo@pacemaker.run` / `Demo1234!`. | Needed something; documented in README. |
 | 13 | Accent color: electric blue (sky-400/500 family). | Spec offered deep teal or electric blue; blue reads better on the dark card UI and is unmistakably not Strava orange. |
+| 14 | Pinned Prisma ^6 and Express ^4 even though Prisma 7 / Express 5 are the latest majors. | Both new majors change config/middleware semantics; v6/v4 are the battle-tested surfaces this plan assumes. Prisma's `package.json#prisma` seed hook deprecation noted for a future Prisma 7 upgrade. |
+| 15 | Plan-length clamping anchors the plan END at race date: `startDate = raceDate − totalWeeks` weeks. If the race is < 8 weeks out, early plan weeks fall in the past (shown as missed); if > 20 weeks out, the plan starts in the future. | Clamping to 8–20 weeks can't both start today and end at the race; anchoring to the race keeps taper/race-week placement physiologically correct. |

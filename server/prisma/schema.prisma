@@ -1,0 +1,90 @@
+// Pacemaker — Prisma schema (SQLite)
+//
+// SQLite does not support native enums via Prisma, so constrained values are
+// plain String fields with allowed values documented below. Enforcement is
+// app-level (zod validation in the API layer).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  passwordHash   String
+  /// Allowed values: "mi" | "km"
+  unitPreference String   @default("mi")
+  createdAt      DateTime @default(now())
+
+  profile Profile?
+  plans   TrainingPlan[]
+  runs    LoggedRun[]
+}
+
+model Profile {
+  id                     String   @id @default(cuid())
+  userId                 String   @unique
+  /// Allowed values: "beginner" | "intermediate" | "advanced"
+  experienceLevel        String
+  currentWeeklyMileageKm Float
+  raceDate               DateTime
+  /// Day of week for the long run: 0 = Sunday … 6 = Saturday (JS Date.getDay())
+  longRunDay             Int
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model TrainingPlan {
+  id          String   @id @default(cuid())
+  userId      String
+  startDate   DateTime
+  raceDate    DateTime
+  totalWeeks  Int
+  generatedAt DateTime @default(now())
+
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workouts PlannedWorkout[]
+}
+
+model PlannedWorkout {
+  id               String   @id @default(cuid())
+  planId           String
+  date             DateTime
+  /// Allowed values: "long" | "easy" | "tempo" | "speed" | "rest" | "race"
+  type             String
+  targetDistanceKm Float?
+  targetPaceZone   String?
+  notes            String?
+  /// 0-based week number within the plan
+  weekIndex        Int
+  /// Allowed values: "base" | "build" | "peak" | "taper"
+  phase            String
+
+  plan       TrainingPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  loggedRuns LoggedRun[]
+
+  @@index([planId, date])
+}
+
+model LoggedRun {
+  id               String   @id @default(cuid())
+  userId           String
+  plannedWorkoutId String?
+  date             DateTime
+  distanceKm       Float
+  durationSeconds  Int
+  avgHeartRate     Int?
+  /// Rate of perceived exertion, 1–10
+  rpe              Int?
+  notes            String?
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plannedWorkout PlannedWorkout? @relation(fields: [plannedWorkoutId], references: [id], onDelete: SetNull)
+
+  @@index([userId, date])
+}
