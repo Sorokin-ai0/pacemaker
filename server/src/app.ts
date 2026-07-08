@@ -39,7 +39,9 @@ export function createApp(): Express {
   });
 
   // Production: serve the built SPA with an index.html fallback for non-API GETs.
-  if (env.isProduction) {
+  // Skipped on Vercel, where the platform serves client/dist statically and this
+  // app runs only as the /api serverless function.
+  if (env.isProduction && !process.env.VERCEL) {
     // From server/dist/app.js (or server/src/app.ts) → repo-root/client/dist.
     const clientDist = path.resolve(
       path.dirname(fileURLToPath(import.meta.url)),

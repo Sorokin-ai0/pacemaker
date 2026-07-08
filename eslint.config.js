@@ -13,6 +13,7 @@ export default tseslint.config(
       "**/dev-dist/**",
       "**/coverage/**",
       "server/prisma/migrations/**",
+      "api/**",
     ],
   },
   js.configs.recommended,
