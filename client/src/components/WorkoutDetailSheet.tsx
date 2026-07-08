@@ -1,10 +1,11 @@
 import { format, parseISO } from "date-fns";
-import { CheckCircle2, NotebookPen, PencilLine } from "lucide-react";
+import { CheckCircle2, Loader2, NotebookPen, PencilLine, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { toApiError, workoutsApi } from "@/api";
 import type { LoggedRunDTO, PlannedWorkoutDTO, Unit, WorkoutType } from "@/api/types";
+import { CoachText } from "@/components/CoachText";
 import { PaceText } from "@/components/PaceText";
 import { PhaseBadge, WorkoutTypeBadge } from "@/components/WorkoutTypeBadge";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ import {
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/use-toast";
+import { coachExplainWorkout } from "@/lib/aiCoach";
 import { formatDistance, formatDuration, kmToUnit, unitLabel, unitToKm } from "@/lib/units";
 import { WORKOUT_META } from "@/lib/workouts";
 
@@ -59,10 +61,26 @@ export function WorkoutDetailSheet({
   const [type, setType] = useState<WorkoutType>("easy");
   const [distance, setDistance] = useState("");
   const [notes, setNotes] = useState("");
+  const [explanation, setExplanation] = useState<string | null>(null);
+  const [explaining, setExplaining] = useState(false);
 
   useEffect(() => {
     setEditing(false);
+    setExplanation(null);
+    setExplaining(false);
   }, [workout?.id, open]);
+
+  const explainWorkout = async () => {
+    if (!workout || explaining) return;
+    setExplaining(true);
+    const res = await coachExplainWorkout({ workout, unit });
+    setExplanation(
+      res.configured === false
+        ? "The AI coach isn't configured — add an ANTHROPIC_API_KEY on the server."
+        : (res.text ?? "Couldn't load an explanation right now."),
+    );
+    setExplaining(false);
+  };
 
   if (!workout) return null;
 
@@ -181,7 +199,31 @@ export function WorkoutDetailSheet({
               <Button variant="outline" onClick={startEditing}>
                 <PencilLine aria-hidden="true" /> Edit workout
               </Button>
+              {!explanation && (
+                <Button
+                  variant="ghost"
+                  className="text-primary"
+                  onClick={() => void explainWorkout()}
+                  disabled={explaining}
+                >
+                  {explaining ? (
+                    <Loader2 className="animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Sparkles aria-hidden="true" />
+                  )}
+                  Why this workout?
+                </Button>
+              )}
             </div>
+
+            {explanation && (
+              <div className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2.5 text-sm">
+                <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-primary/80">
+                  <Sparkles className="size-3.5" aria-hidden="true" /> Coach
+                </p>
+                <CoachText text={explanation} className="leading-relaxed" />
+              </div>
+            )}
           </div>
         ) : (
           <form

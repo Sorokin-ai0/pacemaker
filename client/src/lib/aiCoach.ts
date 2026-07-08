@@ -27,7 +27,14 @@ import type {
   UserDTO,
 } from "@/api/types";
 import { storage, storageKeys } from "@/local/storageAdapter";
-import { formatDistance, formatDuration, formatPace, kmToUnit, unitLabel } from "@/lib/units";
+import {
+  formatDistance,
+  formatDuration,
+  formatPace,
+  kmToUnit,
+  unitLabel,
+  unitToKm,
+} from "@/lib/units";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -38,7 +45,11 @@ export type CoachFeature =
   | "post_run_recap"
   | "weekly_checkin"
   | "plan_reasoning"
-  | "chat";
+  | "workout_explainer"
+  | "race_strategy"
+  | "plan_adjustment"
+  | "insights"
+  | "parse_run";
 
 export interface CoachResult {
   /** false → no ANTHROPIC_API_KEY on the server; UI shows a "not configured" state. */
@@ -506,30 +517,222 @@ export function clearChatHistory(): void {
   storage.remove(storageKeys.coachChat);
 }
 
-export async function coachChat(input: {
-  history: ChatMessage[];
-  data: CoachData;
-}): Promise<CoachResult> {
-  const unit: Unit = input.data.user?.unitPreference ?? "mi";
-  const current = input.data.plan ? deriveCurrent(input.data.plan) : null;
-
-  const context: Record<string, unknown> = {
-    ...baseContext(input.data),
+function buildChatContext(data: CoachData): Record<string, unknown> {
+  const unit: Unit = data.user?.unitPreference ?? "mi";
+  const current = data.plan ? deriveCurrent(data.plan) : null;
+  const fatigue = detectFatigue(data.runs, data.plan);
+  return {
+    ...baseContext(data),
     todayWorkout: current?.todayWorkout ? summarizeWorkout(current.todayWorkout, unit) : null,
-    recentRuns: recentRunSummaries(input.data.runs, input.data.plan, unit, 3),
+    projectedFinish:
+      data.stats.projection.projectedSeconds !== null
+        ? formatDuration(data.stats.projection.projectedSeconds)
+        : null,
+    recentRuns: recentRunSummaries(data.runs, data.plan, unit, 3),
+    ...(fatigue ? { fatigue } : {}),
   };
-
-  // Only the last few turns go to the model — the full thread stays local.
-  const messages = input.history
-    .slice(-8)
-    .map((m) => ({ role: m.role, content: m.content }));
-
-  return coachChatCall(context, messages);
 }
 
-function coachChatCall(
-  context: Record<string, unknown>,
-  messages: { role: "user" | "assistant"; content: string }[],
-): Promise<CoachResult> {
-  return callCoach("chat", context, messages);
+/**
+ * Streaming coach chat. Streams token deltas to `onDelta` as they arrive and
+ * resolves with the full reply. The full thread lives in localStorage; only the
+ * last few turns are sent (the server trims again).
+ */
+export async function streamCoachChat(input: {
+  history: ChatMessage[];
+  data: CoachData;
+  onDelta: (chunk: string) => void;
+  signal?: AbortSignal;
+}): Promise<CoachResult> {
+  const context = buildChatContext(input.data);
+  const messages = input.history.slice(-10).map((m) => ({ role: m.role, content: m.content }));
+
+  let res: Response;
+  try {
+    res = await fetch("/api/coach/chat", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ context, messages }),
+      signal: input.signal,
+    });
+  } catch {
+    return { configured: true, text: null, error: "Could not reach the coach." };
+  }
+
+  if (res.status === 503) return { configured: false, text: null };
+  if (!res.ok || !res.body) {
+    return { configured: true, text: null, error: `Coach request failed (${res.status}).` };
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let full = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      if (chunk) {
+        full += chunk;
+        input.onDelta(chunk);
+      }
+    }
+  } catch {
+    if (full.length === 0) return { configured: true, text: null, error: "The coach was interrupted." };
+  }
+  return { configured: true, text: full.trim() || null };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Contextual explainers + planning/strategy features
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Config probe so the UI can show a "not configured" state without a full call. */
+let statusCache: boolean | null = null;
+export async function getCoachStatus(): Promise<boolean> {
+  if (statusCache !== null) return statusCache;
+  try {
+    const res = await apiFetch<{ configured: boolean }>("/api/coach/status", { on401: "ignore" });
+    statusCache = res.configured;
+    return res.configured;
+  } catch {
+    return false;
+  }
+}
+
+/** Contextual explainer — "Why this workout?" */
+export function coachExplainWorkout(input: {
+  workout: PlannedWorkoutDTO;
+  unit: Unit;
+  totalWeeks?: number | null;
+}): Promise<CoachResult> {
+  const context: Record<string, unknown> = {
+    unitSystem: input.unit === "mi" ? "miles" : "kilometers",
+    phase: input.workout.phase,
+    week: input.workout.weekIndex + 1,
+    totalWeeks: input.totalWeeks ?? null,
+    workout: summarizeWorkout(input.workout, input.unit),
+  };
+  return callCoach("workout_explainer", context);
+}
+
+/** Race-day pacing strategy (grounded in the finish-time projection + countdown). */
+export function coachRaceStrategy(data: CoachData): Promise<CoachResult> {
+  const unit: Unit = data.user?.unitPreference ?? "mi";
+  const context: Record<string, unknown> = {
+    ...baseContext(data),
+    raceDistance: "half marathon (21.1 km / 13.1 mi)",
+    projectedFinish:
+      data.stats.projection.projectedSeconds !== null
+        ? formatDuration(data.stats.projection.projectedSeconds)
+        : null,
+    projectionBasis: data.stats.projection.basisRun
+      ? {
+          date: data.stats.projection.basisRun.date,
+          distance: formatDistance(data.stats.projection.basisRun.distanceKm, unit),
+          duration: formatDuration(data.stats.projection.basisRun.durationSeconds),
+        }
+      : null,
+    recentRuns: recentRunSummaries(data.runs, data.plan, unit, 3),
+  };
+  return callCoach("race_strategy", context);
+}
+
+/** Plan-adjustment suggestions when the athlete has fallen behind (suggests only). */
+export function coachPlanAdjustment(data: CoachData): Promise<CoachResult> {
+  const unit: Unit = data.user?.unitPreference ?? "mi";
+  const fatigue = detectFatigue(data.runs, data.plan);
+  const context: Record<string, unknown> = {
+    ...baseContext(data),
+    recentWeeks: data.stats.weeklyMileage.slice(-3).map((w) => ({
+      weekStart: w.weekStart,
+      planned: formatDistance(w.plannedKm, unit),
+      logged: formatDistance(w.loggedKm, unit),
+    })),
+    ...(fatigue ? { fatigue } : {}),
+  };
+  return callCoach("plan_adjustment", context);
+}
+
+/** Trend / fatigue insight callout. */
+export function coachInsights(data: CoachData): Promise<CoachResult> {
+  const unit: Unit = data.user?.unitPreference ?? "mi";
+  const fatigue = detectFatigue(data.runs, data.plan);
+  const paceTrend = data.stats.paceTrend.slice(-5).map((p) => ({
+    date: p.date,
+    pace: formatPace(p.paceSecPerKm, unit),
+    distance: formatDistance(p.distanceKm, unit),
+  }));
+  const context: Record<string, unknown> = {
+    ...baseContext(data),
+    recentWeeks: data.stats.weeklyMileage.slice(-4).map((w) => ({
+      weekStart: w.weekStart,
+      planned: formatDistance(w.plannedKm, unit),
+      logged: formatDistance(w.loggedKm, unit),
+    })),
+    paceTrend,
+    ...(fatigue ? { fatigue } : {}),
+  };
+  return callCoach("insights", context);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Smart logging — natural-language run parsing
+// ────────────────────────────────────────────────────────────────────────────
+
+export interface ParsedRunDraft {
+  distanceKm: number | null;
+  durationSeconds: number | null;
+  date: string | null;
+  rpe: number | null;
+  notes: string | null;
+}
+
+/**
+ * Parse a free-text sentence ("ran 8k in 45 min this morning, felt easy") into a
+ * structured draft. Returns `null` on a not-configured/failed/unparseable
+ * response. The model returns distance in the athlete's unit; we convert to km
+ * here so the number math stays on our side.
+ */
+export async function parseRunText(input: {
+  text: string;
+  user: UserDTO | null;
+}): Promise<{ configured: boolean; draft: ParsedRunDraft | null; error?: string }> {
+  const unit: Unit = input.user?.unitPreference ?? "mi";
+  const context = {
+    today: todayISO(),
+    unit: unit === "mi" ? "miles" : "kilometers",
+    text: input.text.slice(0, 500),
+  };
+  const res = await callCoach("parse_run", context);
+  if (!res.configured) return { configured: false, draft: null };
+  if (!res.text) return { configured: true, draft: null, error: res.error ?? "No response." };
+
+  try {
+    const cleaned = res.text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+    const raw = JSON.parse(cleaned) as {
+      distance?: number | null;
+      durationSeconds?: number | null;
+      date?: string | null;
+      rpe?: number | null;
+      notes?: string | null;
+    };
+    const distance = typeof raw.distance === "number" && raw.distance > 0 ? raw.distance : null;
+    return {
+      configured: true,
+      draft: {
+        distanceKm: distance !== null ? unitToKm(distance, unit) : null,
+        durationSeconds:
+          typeof raw.durationSeconds === "number" && raw.durationSeconds > 0
+            ? Math.round(raw.durationSeconds)
+            : null,
+        date: typeof raw.date === "string" ? raw.date : null,
+        rpe: typeof raw.rpe === "number" ? raw.rpe : null,
+        notes: typeof raw.notes === "string" && raw.notes.trim() !== "" ? raw.notes.trim() : null,
+      },
+    };
+  } catch {
+    return { configured: true, draft: null, error: "Couldn't understand that — try rephrasing." };
+  }
 }

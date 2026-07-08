@@ -8,6 +8,7 @@ import { AuthProvider } from "@/context/AuthProvider";
 import { SettingsProvider } from "@/context/SettingsProvider";
 import { ThemeProvider } from "@/context/ThemeProvider";
 import { CalendarPage } from "@/pages/CalendarPage";
+import { CoachPage } from "@/pages/CoachPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { OnboardingPage } from "@/pages/OnboardingPage";
@@ -72,6 +73,7 @@ export default function App() {
                     <Route path="/dashboard" element={<DashboardPage />} />
                     <Route path="/calendar" element={<CalendarPage />} />
                     <Route path="/log" element={<RunLogPage />} />
+                    <Route path="/coach" element={<CoachPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
                   </Route>
                 </Route>

@@ -1,7 +1,17 @@
 import { format, parseISO } from "date-fns";
-import { AlertTriangle, CheckCircle2, Footprints, Heart, Pencil, Plus, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Footprints,
+  Heart,
+  Loader2,
+  Pencil,
+  Plus,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { planApi, runsApi, toApiError } from "@/api";
 import type { LoggedRunDTO, PlannedWorkoutDTO } from "@/api/types";
@@ -10,15 +20,17 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { EmptyState } from "@/components/EmptyState";
 import { PaceText } from "@/components/PaceText";
 import { PageHeader } from "@/components/PageHeader";
-import { RunDialog } from "@/components/RunDialog";
+import { RunDialog, type RunDraft } from "@/components/RunDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from "@/context/auth";
 import { useDisplaySettings } from "@/context/settings";
 import { useApi } from "@/hooks/use-api";
+import { parseRunText } from "@/lib/aiCoach";
 import { formatDistance, formatDuration } from "@/lib/units";
 import { WORKOUT_META, WEEKDAY_SHORT } from "@/lib/workouts";
 
@@ -30,14 +42,19 @@ export function RunLogPage() {
 
   const runs = useApi(() => runsApi.list());
   const plan = useApi(() => planApi.get());
+  const navigate = useNavigate();
 
   const [searchParams, setSearchParams] = useSearchParams();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRun, setEditingRun] = useState<LoggedRunDTO | null>(null);
   const [presetWorkout, setPresetWorkout] = useState<PlannedWorkoutDTO | null>(null);
+  const [draft, setDraft] = useState<RunDraft | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<LoggedRunDTO | null>(null);
   // The most recently logged (not edited) run — drives the AI coach recap.
   const [recapRun, setRecapRun] = useState<LoggedRunDTO | null>(null);
+  // Natural-language quick-log.
+  const [nlText, setNlText] = useState("");
+  const [nlLoading, setNlLoading] = useState(false);
 
   // Deep link from calendar / dashboard: /log?workout=<id>
   const workoutParam = searchParams.get("workout");
@@ -48,6 +65,7 @@ export function RunLogPage() {
     if (workout) {
       setPresetWorkout(workout);
       setEditingRun(null);
+      setDraft(null);
       setDialogOpen(true);
     }
   }, [workoutParam, plan.data, setSearchParams]);
@@ -66,13 +84,56 @@ export function RunLogPage() {
   const openCreate = () => {
     setEditingRun(null);
     setPresetWorkout(null);
+    setDraft(null);
     setDialogOpen(true);
   };
 
   const openEdit = (run: LoggedRunDTO) => {
     setEditingRun(run);
     setPresetWorkout(null);
+    setDraft(null);
     setDialogOpen(true);
+  };
+
+  const handleNlLog = async (e: FormEvent) => {
+    e.preventDefault();
+    const text = nlText.trim();
+    if (!text || nlLoading) return;
+    setNlLoading(true);
+    const res = await parseRunText({ text, user });
+    setNlLoading(false);
+    if (res.configured === false) {
+      toast({
+        variant: "destructive",
+        title: "AI logging unavailable",
+        description: "Set an ANTHROPIC_API_KEY on the server to log runs from text.",
+      });
+      return;
+    }
+    if (!res.draft || (res.draft.distanceKm === null && res.draft.durationSeconds === null)) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't read that run",
+        description: res.error ?? "Try including a distance and a time, e.g. '8 km in 45 min'.",
+      });
+      return;
+    }
+    setNlText("");
+    setEditingRun(null);
+    setPresetWorkout(null);
+    setDraft(res.draft);
+    setDialogOpen(true);
+  };
+
+  const askCoachAboutRun = (run: LoggedRunDTO) => {
+    const summary = `${formatDistance(run.distanceKm, unit)} in ${formatDuration(run.durationSeconds)}${
+      run.rpe !== null ? `, RPE ${run.rpe}` : ""
+    }`;
+    navigate("/coach", {
+      state: {
+        seedPrompt: `I logged a run on ${format(parseISO(run.date), "MMM d")}: ${summary}. How did it go, and what should I take from it?`,
+      },
+    });
   };
 
   const handleSaved = (saved: LoggedRunDTO, previous: LoggedRunDTO | null) => {
@@ -126,6 +187,26 @@ export function RunLogPage() {
           onDismiss={() => setRecapRun(null)}
         />
       )}
+
+      <form onSubmit={handleNlLog} className="mb-4 flex gap-2">
+        <div className="relative flex-1">
+          <Sparkles
+            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-primary"
+            aria-hidden="true"
+          />
+          <Input
+            value={nlText}
+            onChange={(e) => setNlText(e.target.value)}
+            placeholder="Quick log with AI — e.g. “ran 8k in 45 min this morning, felt easy”"
+            className="pl-9"
+            disabled={nlLoading}
+            aria-label="Describe your run in plain language"
+          />
+        </div>
+        <Button type="submit" disabled={nlLoading || nlText.trim() === ""}>
+          {nlLoading ? <Loader2 className="animate-spin" aria-hidden="true" /> : "Log with AI"}
+        </Button>
+      </form>
 
       {runs.loading ? (
         <div className="space-y-3">
@@ -214,6 +295,15 @@ export function RunLogPage() {
                       <Button
                         variant="ghost"
                         size="icon"
+                        className="text-muted-foreground hover:text-primary"
+                        aria-label={`Ask the coach about your run on ${format(parseISO(run.date), "MMMM d")}`}
+                        onClick={() => askCoachAboutRun(run)}
+                      >
+                        <Sparkles aria-hidden="true" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         aria-label={`Edit run on ${format(parseISO(run.date), "MMMM d")}`}
                         onClick={() => openEdit(run)}
                       >
@@ -244,10 +334,12 @@ export function RunLogPage() {
           if (!open) {
             setPresetWorkout(null);
             setEditingRun(null);
+            setDraft(null);
           }
         }}
         run={editingRun}
         presetWorkout={presetWorkout}
+        draft={draft}
         plan={plan.data}
         unit={unit}
         onSaved={handleSaved}

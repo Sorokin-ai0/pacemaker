@@ -1,4 +1,4 @@
-import { CalendarDays, Footprints, LayoutDashboard, Settings } from "lucide-react";
+import { CalendarDays, Footprints, LayoutDashboard, Settings, Sparkles } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 
 import { Logo, LogoMark } from "@/components/Logo";
@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/calendar", label: "Calendar", icon: CalendarDays },
   { to: "/log", label: "Run log", icon: Footprints },
+  { to: "/coach", label: "Coach", icon: Sparkles },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -66,7 +67,7 @@ export function AppShell() {
         className="fixed inset-x-0 bottom-0 z-40 border-t bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
         aria-label="Primary"
       >
-        <div className="grid grid-cols-4">
+        <div className="grid grid-cols-5">
           {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}

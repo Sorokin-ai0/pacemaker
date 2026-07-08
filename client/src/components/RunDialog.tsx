@@ -34,6 +34,15 @@ const NONE_VALUE = "none";
 /** "Nearby" planned workouts = within this many days of the run date. */
 const NEARBY_DAYS = 3;
 
+/** Pre-filled values for create mode (e.g. from AI natural-language logging). */
+export interface RunDraft {
+  date?: string | null;
+  distanceKm?: number | null;
+  durationSeconds?: number | null;
+  rpe?: number | null;
+  notes?: string | null;
+}
+
 interface RunDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -41,6 +50,8 @@ interface RunDialogProps {
   run: LoggedRunDTO | null;
   /** Workout preselected via ?workout=<id> deep link (create mode only). */
   presetWorkout: PlannedWorkoutDTO | null;
+  /** Pre-filled create values (create mode only) — reviewed before saving. */
+  draft?: RunDraft | null;
   plan: PlanDTO | null;
   unit: Unit;
   onSaved: (run: LoggedRunDTO, previous: LoggedRunDTO | null) => void;
@@ -51,6 +62,7 @@ export function RunDialog({
   onOpenChange,
   run,
   presetWorkout,
+  draft,
   plan,
   unit,
   onSaved,
@@ -85,17 +97,25 @@ export function RunDialog({
       setWorkoutId(run.plannedWorkoutId ?? NONE_VALUE);
     } else {
       const today = format(new Date(), "yyyy-MM-dd");
-      const startDate = presetWorkout ? presetWorkout.date : today;
+      const startDate = draft?.date ?? (presetWorkout ? presetWorkout.date : today);
       setDate(startDate);
-      setDistance(
-        presetWorkout?.targetDistanceKm
-          ? String(Math.round(kmToUnit(presetWorkout.targetDistanceKm, unit) * 10) / 10)
-          : "",
+      if (draft?.distanceKm != null) {
+        setDistance(String(Math.round(kmToUnit(draft.distanceKm, unit) * 100) / 100));
+      } else {
+        setDistance(
+          presetWorkout?.targetDistanceKm
+            ? String(Math.round(kmToUnit(presetWorkout.targetDistanceKm, unit) * 10) / 10)
+            : "",
+        );
+      }
+      setDuration(
+        draft?.durationSeconds != null
+          ? secondsToDurationParts(draft.durationSeconds)
+          : { h: "", m: "", s: "" },
       );
-      setDuration({ h: "", m: "", s: "" });
       setHeartRate("");
-      setRpe(null);
-      setNotes("");
+      setRpe(draft?.rpe ?? null);
+      setNotes(draft?.notes ?? "");
       if (presetWorkout) {
         setWorkoutId(presetWorkout.id);
       } else {
@@ -106,7 +126,7 @@ export function RunDialog({
       }
     }
     setFieldErrors({});
-  }, [open, run, presetWorkout, plan, unit]);
+  }, [open, run, presetWorkout, draft, plan, unit]);
 
   const workoutOptions = useMemo(() => {
     if (!plan || !date) return [];
