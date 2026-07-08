@@ -160,6 +160,32 @@ docker run -p 3001:3001 \
 
 Then open http://localhost:3001.
 
+## Deployment — Vercel + Supabase
+
+Vercel doesn't run long-lived servers, so on Vercel the React app is served **statically**
+and the Express API runs as a **serverless function** (`api/index.ts`, built by
+`vercel.json`'s `functions.includeFiles` so Prisma's native query-engine binaries ship with
+the function — without that, every DB call fails with a 500).
+
+1. Provision the schema in Supabase once (run [`supabase/schema.sql`](supabase/schema.sql)).
+2. Vercel → **Add New Project** → import this repo. **Settings → General → Root Directory**
+   must be **empty** (repo root) — a wrong value here causes an immediate build failure.
+   Framework Preset: **Other**. Leave Build Command / Output Directory **not overridden** so
+   `vercel.json` controls them.
+3. Set environment variables (Settings → Environment Variables, Production):
+   - `DATABASE_URL` — **required**, your Supabase **Transaction pooler** string (port
+     **6543**, not 5432), with `?pgbouncer=true&connection_limit=1` appended. Each function
+     invocation opens its own DB connection, so the pooler (not the direct connection) and a
+     capped `connection_limit` are required — without them you'll exhaust Postgres's
+     connection limit under any real traffic. Example:
+     ```
+     postgresql://postgres.<ref>:<url-encoded-password>@aws-0-<region>.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1
+     ```
+   - `JWT_SECRET` — **required**, a long random string (`openssl rand -base64 48`).
+4. Deploy. If login/register return a 500, check **Deployments → (your deployment) →
+   Functions → api/index** for the real error — almost always a missing/misconfigured
+   `DATABASE_URL` or (if you changed `vercel.json`) missing Prisma engine files.
+
 ## Project structure
 
 ```
