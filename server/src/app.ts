@@ -5,6 +5,7 @@ import cookieParser from "cookie-parser";
 import { env } from "./env.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { authRouter } from "./routes/auth.js";
+import { coachRouter } from "./routes/coach.js";
 import { healthRouter } from "./routes/health.js";
 import { meRouter } from "./routes/me.js";
 import { onboardingRouter } from "./routes/onboarding.js";
@@ -32,6 +33,7 @@ export function createApp(): Express {
   app.use("/api/workouts", workoutsRouter);
   app.use("/api/runs", runsRouter);
   app.use("/api/stats", statsRouter);
+  app.use("/api/coach", coachRouter);
 
   // Unknown /api/* → uniform JSON 404.
   app.use("/api", (_req, res) => {

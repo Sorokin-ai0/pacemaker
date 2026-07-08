@@ -16,4 +16,7 @@ export const env = {
   PORT: Number.parseInt(process.env.PORT ?? "3001", 10),
   JWT_SECRET: process.env.JWT_SECRET ?? "dev-secret-change-me",
   SEED_DEMO: process.env.SEED_DEMO === "true",
+  // Optional: only needed for the AI coach feature. When unset, the coach
+  // endpoints degrade gracefully and the rest of the app is unaffected.
+  ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? "",
 } as const;

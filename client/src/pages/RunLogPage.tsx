@@ -5,6 +5,7 @@ import { useSearchParams } from "react-router-dom";
 
 import { planApi, runsApi, toApiError } from "@/api";
 import type { LoggedRunDTO, PlannedWorkoutDTO } from "@/api/types";
+import { CoachRunRecap } from "@/components/CoachRunRecap";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { EmptyState } from "@/components/EmptyState";
 import { PaceText } from "@/components/PaceText";
@@ -35,6 +36,8 @@ export function RunLogPage() {
   const [editingRun, setEditingRun] = useState<LoggedRunDTO | null>(null);
   const [presetWorkout, setPresetWorkout] = useState<PlannedWorkoutDTO | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<LoggedRunDTO | null>(null);
+  // The most recently logged (not edited) run — drives the AI coach recap.
+  const [recapRun, setRecapRun] = useState<LoggedRunDTO | null>(null);
 
   // Deep link from calendar / dashboard: /log?workout=<id>
   const workoutParam = searchParams.get("workout");
@@ -81,6 +84,8 @@ export function RunLogPage() {
     if (saved.plannedWorkoutId !== null || previous?.plannedWorkoutId) {
       plan.reload();
     }
+    // Only a brand-new run (not an edit) gets a coach recap.
+    if (!previous) setRecapRun(saved);
   };
 
   const handleDelete = async () => {
@@ -111,6 +116,16 @@ export function RunLogPage() {
           </Button>
         }
       />
+
+      {recapRun && (
+        <CoachRunRecap
+          run={recapRun}
+          plan={plan.data}
+          runs={runs.data ?? []}
+          user={user}
+          onDismiss={() => setRecapRun(null)}
+        />
+      )}
 
       {runs.loading ? (
         <div className="space-y-3">

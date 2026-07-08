@@ -21,6 +21,13 @@ export const storageKeys = {
   displaySettings: `${NAMESPACE}displaySettings`,
   /** Theme key predates this adapter; kept for back-compat with ThemeProvider. */
   theme: `${NAMESPACE}theme`,
+  // AI coach state (client-side only): rolling chat history + small caches so we
+  // don't re-bill the model for an unchanged brief/check-in, and snapshots used
+  // to detect a regenerated plan or a newly logged run.
+  coachChat: `${NAMESPACE}coach.chat`,
+  coachDailyBrief: `${NAMESPACE}coach.dailyBrief`,
+  coachWeekly: `${NAMESPACE}coach.weekly`,
+  coachPlanSnapshot: `${NAMESPACE}coach.planSnapshot`,
 } as const;
 
 export const storage = {

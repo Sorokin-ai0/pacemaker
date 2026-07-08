@@ -1,106 +1,535 @@
 /**
- * AI Coach — SCAFFOLD ONLY (not wired to a real model yet).
+ * AI Coach — client service.
  *
- * `getCoachAdvice(context)` is the single seam where a real LLM call will be
- * dropped in later. Today it returns deterministic, phase-aware mock advice so
- * the UI surface (CoachCard on the dashboard) and interaction pattern exist.
+ * This module is the single seam between the app and the coach backend. It
+ * gathers the user's REAL data (plan phase, race countdown, recent runs,
+ * adherence, RPE trends), packs it into a tight, structured JSON context, and
+ * POSTs it to `/api/coach`. The server owns the Anthropic API key and the
+ * prompt; nothing here ever touches the model directly.
  *
- * ────────────────────────────────────────────────────────────────────────────
- * TODO(ai-coach): replace the mock below with a real model call. Planned shape:
- *
- *   const res = await fetch("/api/coach", {
- *     method: "POST",
- *     headers: { "Content-Type": "application/json" },
- *     body: JSON.stringify(context),          // server builds the prompt from
- *   });                                        // plan + recent runs + adherence
- *   return (await res.json()) as CoachAdvice;  // and calls the Claude API
- *                                              // (e.g. model "claude-sonnet-5")
- *
- * Keep the CoachContext → CoachAdvice interface stable so the UI needs no
- * changes when the real backend lands.
- * ────────────────────────────────────────────────────────────────────────────
+ * Everything is grounded in data the app already has, so the model can't invent
+ * stats. Small results (daily brief, weekly check-in, plan reasoning) are cached
+ * in localStorage via the storage adapter to control token usage, and the coach
+ * chat history is persisted the same way.
  */
 
-import type { Phase } from "@/api/types";
+import { differenceInCalendarDays, format, parseISO, startOfWeek } from "date-fns";
 
-export interface CoachContext {
+import { apiFetch, toApiError } from "@/api/http";
+import type {
+  LoggedRunDTO,
+  Phase,
+  PlanDTO,
+  PlannedWorkoutDTO,
+  ProfileDTO,
+  StatsDTO,
+  Unit,
+  UserDTO,
+} from "@/api/types";
+import { storage, storageKeys } from "@/local/storageAdapter";
+import { formatDistance, formatDuration, formatPace, kmToUnit, unitLabel } from "@/lib/units";
+
+// ────────────────────────────────────────────────────────────────────────────
+// Types
+// ────────────────────────────────────────────────────────────────────────────
+
+export type CoachFeature =
+  | "daily_brief"
+  | "post_run_recap"
+  | "weekly_checkin"
+  | "plan_reasoning"
+  | "chat";
+
+export interface CoachResult {
+  /** false → no ANTHROPIC_API_KEY on the server; UI shows a "not configured" state. */
+  configured: boolean;
+  text: string | null;
+  /** Present when the request reached the server but failed (network / model error). */
+  error?: string;
+}
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  ts: number;
+}
+
+/** Everything the coach can be grounded in — components already hold all of it. */
+export interface CoachData {
+  plan: PlanDTO | null;
+  stats: StatsDTO;
+  runs: LoggedRunDTO[];
+  user: UserDTO | null;
+  profile: ProfileDTO | null;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Transport
+// ────────────────────────────────────────────────────────────────────────────
+
+async function callCoach(
+  feature: CoachFeature,
+  context: Record<string, unknown>,
+  messages?: { role: "user" | "assistant"; content: string }[],
+): Promise<CoachResult> {
+  try {
+    const res = await apiFetch<{ configured: boolean; text?: string }>("/api/coach", {
+      method: "POST",
+      body: { feature, context, messages },
+      // A coach hiccup should never yank the user to /login — the dashboard's
+      // own data calls handle a genuinely expired session.
+      on401: "ignore",
+    });
+    if (!res.configured) return { configured: false, text: null };
+    return { configured: true, text: res.text ?? null };
+  } catch (err) {
+    return { configured: true, text: null, error: toApiError(err).message };
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Data shaping (all values pre-formatted in the user's units, so the model
+// never does unit math and can't fabricate numbers)
+// ────────────────────────────────────────────────────────────────────────────
+
+const todayISO = (): string => format(new Date(), "yyyy-MM-dd");
+
+export function deriveCurrent(plan: PlanDTO): {
   phase: Phase;
-  daysToRace: number;
-  adherencePercent: number;
-  taperActive: boolean;
-  /** Pace of the most recent logged run, sec/km — null if nothing logged yet. */
-  lastRunPaceSecPerKm: number | null;
-  /** Which mock tip to show; the UI cycles this for a "new tip" interaction. */
-  tipIndex?: number;
+  week: number | null;
+  todayWorkout: PlannedWorkoutDTO | null;
+} {
+  const today = new Date();
+  let nearest: PlannedWorkoutDTO | null = null;
+  let bestDiff = Infinity;
+  for (const w of plan.workouts) {
+    const diff = Math.abs(differenceInCalendarDays(parseISO(w.date), today));
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      nearest = w;
+    }
+  }
+  const todayStr = todayISO();
+  return {
+    phase: nearest?.phase ?? "base",
+    week: nearest ? Math.min(nearest.weekIndex + 1, plan.totalWeeks) : null,
+    todayWorkout: plan.workouts.find((w) => w.date === todayStr) ?? null,
+  };
 }
 
-export interface CoachAdvice {
-  headline: string;
-  message: string;
-  tips: string[];
+function summarizeWorkout(w: PlannedWorkoutDTO, unit: Unit): Record<string, unknown> {
+  return {
+    type: w.type,
+    phase: w.phase,
+    targetDistance: w.targetDistanceKm !== null ? formatDistance(w.targetDistanceKm, unit) : null,
+    targetPace: w.targetPaceZone,
+    notes: w.notes,
+  };
 }
 
-const PHASE_ADVICE: Record<Phase, CoachAdvice> = {
-  base: {
-    headline: "Base phase — build the engine",
-    message:
-      "Right now the only goal is consistent, easy volume. Speed comes later; durability comes first.",
-    tips: [
-      "Keep easy runs truly easy — you should be able to hold a conversation.",
-      "Don't chase pace this early; chase frequency and sleep.",
-      "Add 4×20 s relaxed strides after one easy run a week to keep the legs snappy.",
-    ],
-  },
-  build: {
-    headline: "Build phase — sharpen gradually",
-    message:
-      "Volume and intensity are both climbing. The quality sessions matter most — protect them by keeping everything else gentle.",
-    tips: [
-      "Fuel before tempo days; they set your half-marathon rhythm.",
-      "A cutback week is planned on purpose — don't 'make up' the missing miles.",
-      "If your legs feel dead two days in a row, swap an easy run for full rest.",
-    ],
-  },
-  peak: {
-    headline: "Peak phase — biggest weeks, biggest payoffs",
-    message:
-      "You're at the top of the mountain of work. Hold steady, practice race-day fueling on the long runs, and trust the plan.",
-    tips: [
-      "Rehearse race-morning routine (breakfast, kit, warm-up) on your overreach long run.",
-      "Lock in your goal pace now and practice its feel during tempo segments.",
-      "Recovery is training: prioritize sleep during these two biggest weeks.",
-    ],
-  },
-  taper: {
-    headline: "Taper — trust the training",
-    message:
-      "Volume drops so you arrive fresh. Feeling twitchy and over-energized is normal — that's the fitness surfacing.",
-    tips: [
-      "Keep the shakeouts genuinely short and easy; save every match for race day.",
-      "Plan your pacing: even or slightly negative splits beat a fast first mile.",
-      "Nothing new on race day — shoes, gels, and kit should all be proven.",
-    ],
-  },
-};
+function summarizeRun(
+  run: LoggedRunDTO,
+  plan: PlanDTO | null,
+  unit: Unit,
+): Record<string, unknown> {
+  const planned = run.plannedWorkoutId
+    ? (plan?.workouts.find((w) => w.id === run.plannedWorkoutId) ?? null)
+    : null;
+  return {
+    date: run.date,
+    distance: formatDistance(run.distanceKm, unit),
+    duration: formatDuration(run.durationSeconds),
+    pace: formatPace(run.paceSecPerKm, unit),
+    rpe: run.rpe,
+    plannedWorkout: planned ? summarizeWorkout(planned, unit) : null,
+  };
+}
 
-export async function getCoachAdvice(context: CoachContext): Promise<CoachAdvice> {
-  // TODO(ai-coach): real LLM call goes here (see module docs above).
-  const base = PHASE_ADVICE[context.phase];
+function sortedByDate(runs: LoggedRunDTO[]): LoggedRunDTO[] {
+  return [...runs].sort((a, b) => a.date.localeCompare(b.date));
+}
 
-  // Light context-awareness so the mock feels real enough to design against.
-  let message = base.message;
-  if (context.taperActive && context.daysToRace <= 7) {
-    message = `${context.daysToRace} days out. ${message}`;
-  } else if (context.adherencePercent >= 85) {
-    message = `${message} Your ${context.adherencePercent}% adherence is excellent — keep it rolling.`;
-  } else if (context.adherencePercent > 0 && context.adherencePercent < 60) {
-    message = `${message} Adherence is at ${context.adherencePercent}% — consistency beats any single big week.`;
+function weekStart(dateStr: string): string {
+  return format(startOfWeek(parseISO(dateStr), { weekStartsOn: 1 }), "yyyy-MM-dd");
+}
+
+function consecutiveRunDayStreak(runs: LoggedRunDTO[]): number {
+  const days = Array.from(new Set(runs.map((r) => r.date))).sort();
+  if (days.length === 0) return 0;
+  let streak = 1;
+  for (let i = days.length - 1; i > 0; i--) {
+    if (differenceInCalendarDays(parseISO(days[i]), parseISO(days[i - 1])) === 1) streak++;
+    else break;
+  }
+  return streak;
+}
+
+// ── Fatigue / overreach signal (feature 7) — soft "consider" flags only ──────
+function detectFatigue(
+  runs: LoggedRunDTO[],
+  plan: PlanDTO | null,
+): Record<string, unknown> | null {
+  const sorted = sortedByDate(runs);
+  const withRpe = sorted.filter((r) => r.rpe !== null).slice(-3);
+  let recentRpeAvg: number | null = null;
+  let highEffort = false;
+  if (withRpe.length >= 2) {
+    const avg = withRpe.reduce((sum, r) => sum + (r.rpe ?? 0), 0) / withRpe.length;
+    recentRpeAvg = Math.round(avg * 10) / 10;
+    highEffort = recentRpeAvg >= 7.5;
   }
 
-  const tipIndex = (context.tipIndex ?? 0) % base.tips.length;
+  // Rest days (from the plan) in the last 10 days on which a run was logged.
+  const todayStr = todayISO();
+  const cutoff = format(
+    new Date(Date.now() - 10 * 24 * 60 * 60 * 1000),
+    "yyyy-MM-dd",
+  );
+  const runDates = new Set(sorted.map((r) => r.date));
+  let restDaysSkipped = 0;
+  if (plan) {
+    for (const w of plan.workouts) {
+      if (w.type === "rest" && w.date >= cutoff && w.date <= todayStr && runDates.has(w.date)) {
+        restDaysSkipped++;
+      }
+    }
+  }
+
+  const streak = consecutiveRunDayStreak(sorted);
+  const flag = highEffort || restDaysSkipped >= 2 || streak >= 6;
+  if (!flag) return null;
+
   return {
-    headline: base.headline,
-    message,
-    tips: [base.tips[tipIndex]],
+    recentRpeAvg,
+    highEffort,
+    restDaysSkipped,
+    consecutiveRunDays: streak,
   };
+}
+
+// ── Milestone detection (feature 8) — at most one, most impressive first ─────
+function detectMilestone(
+  runs: LoggedRunDTO[],
+  unit: Unit,
+): { type: string; detail: string } | null {
+  if (runs.length === 0) return null;
+  const sorted = sortedByDate(runs);
+  const latest = sorted[sorted.length - 1];
+  // Only celebrate around a fresh run.
+  if (differenceInCalendarDays(new Date(), parseISO(latest.date)) > 2) return null;
+
+  const prevMax = Math.max(0, ...sorted.slice(0, -1).map((r) => r.distanceKm));
+  if (sorted.length >= 2 && latest.distanceKm > prevMax + 1e-9) {
+    return { type: "longest_run", detail: `new longest run of ${formatDistance(latest.distanceKm, unit)}` };
+  }
+
+  const weekTotals = new Map<string, number>();
+  for (const r of sorted) {
+    const k = weekStart(r.date);
+    weekTotals.set(k, (weekTotals.get(k) ?? 0) + r.distanceKm);
+  }
+  const latestWeek = weekStart(latest.date);
+  const orderedWeeks = [...weekTotals.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  const firstDoubleDigit = orderedWeeks.find(([, km]) => kmToUnit(km, unit) >= 10);
+  if (firstDoubleDigit && firstDoubleDigit[0] === latestWeek) {
+    return {
+      type: "double_digit_week",
+      detail: `first double-digit ${unitLabel(unit)} week — ${formatDistance(weekTotals.get(latestWeek) ?? 0, unit)} so far`,
+    };
+  }
+
+  const streak = consecutiveRunDayStreak(sorted);
+  if (streak >= 3) return { type: "streak", detail: `${streak}-day running streak` };
+
+  if (sorted.length >= 5 && sorted.length % 5 === 0) {
+    return { type: "consistency", detail: `${sorted.length} runs logged` };
+  }
+  return null;
+}
+
+// ── Base grounding context shared by most features ───────────────────────────
+function baseContext(data: CoachData): Record<string, unknown> {
+  const unit: Unit = data.user?.unitPreference ?? "mi";
+  const current = data.plan ? deriveCurrent(data.plan) : null;
+  const hasAdherence = data.stats.adherence.plannedToDate > 0;
+  return {
+    today: todayISO(),
+    unitSystem: unit === "mi" ? "miles" : "kilometers",
+    experienceLevel: data.profile?.experienceLevel ?? null,
+    phase: current?.phase ?? "base",
+    currentWeek: current?.week ?? null,
+    totalWeeks: data.plan?.totalWeeks ?? null,
+    daysToRace: data.stats.countdown.daysToRace,
+    raceDate: data.stats.countdown.raceDate,
+    taper: data.stats.taper.active,
+    adherencePercent: hasAdherence ? Math.round(data.stats.adherence.percent) : null,
+    adherenceDetail: hasAdherence
+      ? `${data.stats.adherence.completed} of ${data.stats.adherence.plannedToDate} workouts completed`
+      : "no workouts due yet",
+  };
+}
+
+function recentRunSummaries(
+  runs: LoggedRunDTO[],
+  plan: PlanDTO | null,
+  unit: Unit,
+  count: number,
+): Record<string, unknown>[] {
+  return sortedByDate(runs)
+    .slice(-count)
+    .reverse()
+    .map((r) => summarizeRun(r, plan, unit));
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Feature 1 — Daily brief (weaves in taper tone, fatigue caution, milestone)
+// ────────────────────────────────────────────────────────────────────────────
+
+export async function coachDailyBrief(data: CoachData): Promise<CoachResult> {
+  const unit: Unit = data.user?.unitPreference ?? "mi";
+  const current = data.plan ? deriveCurrent(data.plan) : null;
+  const upcoming =
+    current?.todayWorkout ??
+    data.plan?.workouts.find((w) => w.date >= todayISO() && w.type !== "rest") ??
+    null;
+
+  const fatigue = detectFatigue(data.runs, data.plan);
+  const milestone = detectMilestone(data.runs, unit);
+
+  const context: Record<string, unknown> = {
+    ...baseContext(data),
+    todayWorkout: current?.todayWorkout ? summarizeWorkout(current.todayWorkout, unit) : null,
+    nextWorkout: !current?.todayWorkout && upcoming ? summarizeWorkout(upcoming, unit) : null,
+    recentRuns: recentRunSummaries(data.runs, data.plan, unit, 2),
+    ...(fatigue ? { fatigue } : {}),
+    ...(milestone ? { milestone } : {}),
+  };
+
+  const signature = JSON.stringify({
+    d: context.today,
+    p: context.phase,
+    a: context.adherencePercent,
+    w: current?.todayWorkout?.id ?? (upcoming ? `next:${upcoming.id}` : null),
+    f: fatigue ? 1 : 0,
+    m: milestone?.type ?? null,
+  });
+
+  const cached = storage.getJSON<{ signature: string; text: string }>(storageKeys.coachDailyBrief);
+  if (cached && cached.signature === signature && cached.text) {
+    return { configured: true, text: cached.text };
+  }
+
+  const result = await callCoach("daily_brief", context);
+  if (result.configured && result.text) {
+    storage.setJSON(storageKeys.coachDailyBrief, { signature, text: result.text });
+  }
+  return result;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Feature 2 — Post-run recap
+// ────────────────────────────────────────────────────────────────────────────
+
+export async function coachPostRunRecap(input: {
+  run: LoggedRunDTO;
+  plan: PlanDTO | null;
+  runs: LoggedRunDTO[];
+  user: UserDTO | null;
+}): Promise<CoachResult> {
+  const unit: Unit = input.user?.unitPreference ?? "mi";
+  const current = input.plan ? deriveCurrent(input.plan) : null;
+  // Make sure the just-logged run is part of the milestone check.
+  const allRuns = input.runs.some((r) => r.id === input.run.id)
+    ? input.runs
+    : [...input.runs, input.run];
+  const milestone = detectMilestone(allRuns, unit);
+
+  const context: Record<string, unknown> = {
+    unitSystem: unit === "mi" ? "miles" : "kilometers",
+    phase: current?.phase ?? "base",
+    daysToRace: null,
+    loggedRun: summarizeRun(input.run, input.plan, unit),
+    ...(milestone ? { milestone } : {}),
+  };
+
+  return callCoach("post_run_recap", context);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Feature 3 — Weekly check-in
+// ────────────────────────────────────────────────────────────────────────────
+
+export async function coachWeeklyCheckIn(data: CoachData): Promise<CoachResult> {
+  const unit: Unit = data.user?.unitPreference ?? "mi";
+  const recentWeeks = data.stats.weeklyMileage.slice(-3).map((w) => ({
+    weekStart: w.weekStart,
+    planned: formatDistance(w.plannedKm, unit),
+    logged: formatDistance(w.loggedKm, unit),
+  }));
+  const fatigue = detectFatigue(data.runs, data.plan);
+
+  const context: Record<string, unknown> = {
+    ...baseContext(data),
+    recentWeeks,
+    recentRuns: recentRunSummaries(data.runs, data.plan, unit, 3),
+    ...(fatigue ? { fatigue } : {}),
+  };
+
+  const isoWeek = weekStart(todayISO());
+  const signature = JSON.stringify({
+    w: isoWeek,
+    a: context.adherencePercent,
+    weeks: recentWeeks,
+    f: fatigue ? 1 : 0,
+  });
+
+  const cached = storage.getJSON<{ signature: string; text: string }>(storageKeys.coachWeekly);
+  if (cached && cached.signature === signature && cached.text) {
+    return { configured: true, text: cached.text };
+  }
+
+  const result = await callCoach("weekly_checkin", context);
+  if (result.configured && result.text) {
+    storage.setJSON(storageKeys.coachWeekly, { signature, text: result.text });
+  }
+  return result;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Feature 4 — Adaptive plan reasoning (detected via a plan snapshot diff, since
+// the regenerate action itself lives in Settings and isn't ours to touch)
+// ────────────────────────────────────────────────────────────────────────────
+
+interface PlanSnapshot {
+  signature: string;
+  summary: Record<string, unknown>;
+  reasoning?: string;
+  dismissed?: boolean;
+}
+
+function planSignature(plan: PlanDTO): string {
+  return `${plan.id}::${plan.generatedAt}`;
+}
+
+function summarizePlan(
+  plan: PlanDTO,
+  profile: ProfileDTO | null,
+  unit: Unit,
+): Record<string, unknown> {
+  const perWeekKm = new Map<number, number>();
+  const phaseWeeks: Record<string, Set<number>> = {};
+  for (const w of plan.workouts) {
+    if (w.targetDistanceKm !== null) {
+      perWeekKm.set(w.weekIndex, (perWeekKm.get(w.weekIndex) ?? 0) + w.targetDistanceKm);
+    }
+    (phaseWeeks[w.phase] ??= new Set()).add(w.weekIndex);
+  }
+  const peakKm = Math.max(0, ...perWeekKm.values());
+  return {
+    totalWeeks: plan.totalWeeks,
+    raceDate: plan.raceDate,
+    experienceLevel: profile?.experienceLevel ?? null,
+    startingWeeklyVolume:
+      profile?.currentWeeklyMileageKm != null
+        ? formatDistance(profile.currentWeeklyMileageKm, unit)
+        : null,
+    restDaysPerWeek: profile?.restDaysPerWeek ?? 2,
+    peakWeeklyDistance: formatDistance(peakKm, unit),
+    weeksPerPhase: Object.fromEntries(
+      Object.entries(phaseWeeks).map(([phase, weeks]) => [phase, weeks.size]),
+    ),
+  };
+}
+
+export async function coachPlanChange(input: {
+  plan: PlanDTO;
+  profile: ProfileDTO | null;
+  user: UserDTO | null;
+}): Promise<CoachResult & { show: boolean }> {
+  const unit: Unit = input.user?.unitPreference ?? "mi";
+  const signature = planSignature(input.plan);
+  const summary = summarizePlan(input.plan, input.profile, unit);
+  const prev = storage.getJSON<PlanSnapshot>(storageKeys.coachPlanSnapshot);
+
+  // First time we've seen any plan → record a baseline, nothing to explain yet.
+  if (!prev) {
+    storage.setJSON(storageKeys.coachPlanSnapshot, { signature, summary });
+    return { configured: true, text: null, show: false };
+  }
+
+  // Same plan as last time → surface the cached reasoning unless dismissed.
+  if (prev.signature === signature) {
+    if (prev.reasoning && !prev.dismissed) {
+      return { configured: true, text: prev.reasoning, show: true };
+    }
+    return { configured: true, text: null, show: false };
+  }
+
+  // The plan changed — explain it from the real before/after data.
+  const result = await callCoach("plan_reasoning", { before: prev.summary, after: summary });
+  if (result.configured && result.text) {
+    storage.setJSON(storageKeys.coachPlanSnapshot, {
+      signature,
+      summary,
+      reasoning: result.text,
+      dismissed: false,
+    });
+    return { configured: true, text: result.text, show: true };
+  }
+  if (!result.configured) {
+    // No key: rebaseline quietly so we don't keep trying.
+    storage.setJSON(storageKeys.coachPlanSnapshot, { signature, summary });
+    return { configured: false, text: null, show: false };
+  }
+  // Configured but errored — leave the old snapshot so the next load can retry.
+  return { configured: true, text: null, error: result.error, show: false };
+}
+
+export function dismissPlanReasoning(): void {
+  const prev = storage.getJSON<PlanSnapshot>(storageKeys.coachPlanSnapshot);
+  if (prev) storage.setJSON(storageKeys.coachPlanSnapshot, { ...prev, dismissed: true });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Feature 5 — Conversational coach chat (history in localStorage)
+// ────────────────────────────────────────────────────────────────────────────
+
+export function loadChatHistory(): ChatMessage[] {
+  return storage.getJSON<ChatMessage[]>(storageKeys.coachChat) ?? [];
+}
+
+export function saveChatHistory(messages: ChatMessage[]): void {
+  storage.setJSON(storageKeys.coachChat, messages.slice(-50));
+}
+
+export function clearChatHistory(): void {
+  storage.remove(storageKeys.coachChat);
+}
+
+export async function coachChat(input: {
+  history: ChatMessage[];
+  data: CoachData;
+}): Promise<CoachResult> {
+  const unit: Unit = input.data.user?.unitPreference ?? "mi";
+  const current = input.data.plan ? deriveCurrent(input.data.plan) : null;
+
+  const context: Record<string, unknown> = {
+    ...baseContext(input.data),
+    todayWorkout: current?.todayWorkout ? summarizeWorkout(current.todayWorkout, unit) : null,
+    recentRuns: recentRunSummaries(input.data.runs, input.data.plan, unit, 3),
+  };
+
+  // Only the last few turns go to the model — the full thread stays local.
+  const messages = input.history
+    .slice(-8)
+    .map((m) => ({ role: m.role, content: m.content }));
+
+  return coachChatCall(context, messages);
+}
+
+function coachChatCall(
+  context: Record<string, unknown>,
+  messages: { role: "user" | "assistant"; content: string }[],
+): Promise<CoachResult> {
+  return callCoach("chat", context, messages);
 }

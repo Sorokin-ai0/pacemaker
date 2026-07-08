@@ -102,6 +102,7 @@ Copy `.env.example` to `server/.env`. Variables:
 | `PORT`         | `3001`                 | Port the API (and, in production, the whole app) listens on    |
 | `NODE_ENV`     | `development`          | `production` enables SPA static serving                        |
 | `SEED_DEMO`    | `false`                | If `true`, seed demo data on startup when the DB is empty      |
+| `ANTHROPIC_API_KEY` | _(unset)_         | **Optional** — only for the AI coach. Read server-side, never sent to the browser. Unset ⇒ coach shows an "AI coach not configured" state and the rest of the app is unaffected. |
 
 ## Testing
 
@@ -182,6 +183,10 @@ the function — without that, every DB call fails with a 500).
      postgresql://postgres.<ref>:<url-encoded-password>@aws-0-<region>.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1
      ```
    - `JWT_SECRET` — **required**, a long random string (`openssl rand -base64 48`).
+   - `ANTHROPIC_API_KEY` — **optional**, enables the AI coach. Paste a key from
+     [console.anthropic.com](https://console.anthropic.com/); it's read only in the
+     `api/index` serverless function and never reaches the browser. Leave it unset and the
+     coach simply shows an "AI coach not configured" state.
 4. Deploy. If login/register return a 500, check **Deployments → (your deployment) →
    Functions → api/index** for the real error — almost always a missing/misconfigured
    `DATABASE_URL` or (if you changed `vercel.json`) missing Prisma engine files.
