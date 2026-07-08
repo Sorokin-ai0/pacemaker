@@ -19,6 +19,7 @@ function authCookies(res: request.Response): string[] {
 }
 
 beforeAll(async () => {
+  if (!process.env.TEST_DATABASE_URL) return; // DB suites skip without a test DB
   await prisma.user.deleteMany({}); // cascades: profiles, plans, workouts, runs
 });
 
@@ -26,7 +27,7 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-describe("POST /api/auth/register", () => {
+describe.skipIf(!process.env.TEST_DATABASE_URL)("POST /api/auth/register", () => {
   it("creates a user: 201, UserDTO shape, HttpOnly pm_token cookie", async () => {
     const res = await request(app)
       .post("/api/auth/register")
@@ -110,7 +111,7 @@ describe("POST /api/auth/register", () => {
   });
 });
 
-describe("POST /api/auth/login", () => {
+describe.skipIf(!process.env.TEST_DATABASE_URL)("POST /api/auth/login", () => {
   it("logs in with correct credentials: 200 + user + cookie", async () => {
     const res = await request(app)
       .post("/api/auth/login")
@@ -148,7 +149,7 @@ describe("POST /api/auth/login", () => {
   });
 });
 
-describe("GET /api/auth/me", () => {
+describe.skipIf(!process.env.TEST_DATABASE_URL)("GET /api/auth/me", () => {
   it("returns the user with a null profile before onboarding", async () => {
     const agent = request.agent(app);
     await agent
@@ -170,7 +171,7 @@ describe("GET /api/auth/me", () => {
   });
 });
 
-describe("POST /api/auth/logout", () => {
+describe.skipIf(!process.env.TEST_DATABASE_URL)("POST /api/auth/logout", () => {
   it("returns 204, clears the cookie, and subsequent /api/plan is 401", async () => {
     const agent = request.agent(app);
     await agent
@@ -192,7 +193,7 @@ describe("POST /api/auth/logout", () => {
   });
 });
 
-describe("token integrity", () => {
+describe.skipIf(!process.env.TEST_DATABASE_URL)("token integrity", () => {
   it("rejects a garbage cookie value with 401", async () => {
     const res = await request(app).get("/api/auth/me").set("Cookie", "pm_token=garbage-not-a-jwt");
     expect(res.status).toBe(401);
@@ -221,7 +222,7 @@ describe("token integrity", () => {
   });
 });
 
-describe("protected routes without a cookie", () => {
+describe.skipIf(!process.env.TEST_DATABASE_URL)("protected routes without a cookie", () => {
   it.each([
     ["GET", "/api/plan"],
     ["GET", "/api/runs"],
@@ -235,9 +236,8 @@ describe("protected routes without a cookie", () => {
     ["PATCH", "/api/runs/some-id"],
     ["DELETE", "/api/runs/some-id"],
   ] as const)("%s %s → 401 UNAUTHORIZED", async (method, path) => {
-    const res = await request(app)[method.toLowerCase() as "get" | "post" | "patch" | "delete"](
-      path,
-    );
+    const res =
+      await request(app)[method.toLowerCase() as "get" | "post" | "patch" | "delete"](path);
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe("UNAUTHORIZED");
   });

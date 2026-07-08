@@ -24,6 +24,7 @@ export const onboardingSchema = z.object({
   currentWeeklyMileageKm: z.number().positive(),
   raceDate: dateStringSchema,
   longRunDay: z.number().int().min(0).max(6),
+  restDaysPerWeek: z.union([z.literal(1), z.literal(2)]).optional(),
 });
 
 export const regenerateSchema = onboardingSchema.partial();

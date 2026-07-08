@@ -1,11 +1,13 @@
 /**
- * Per-file safety net: refuse to run if the environment does not point at the
- * throwaway test database. Protects server/prisma/dev.db (seeded demo data)
- * from ever being wiped by a misconfigured run.
+ * Per-file safety net. When DB-backed tests are enabled (TEST_DATABASE_URL set),
+ * refuse to run unless the live DATABASE_URL is exactly that throwaway test DB —
+ * this prevents the suites (which delete/truncate rows) from ever touching a
+ * real database. When TEST_DATABASE_URL is unset, the DB suites skip themselves.
  */
-if (!process.env.DATABASE_URL?.includes("test.db")) {
+const testUrl = process.env.TEST_DATABASE_URL;
+if (testUrl && process.env.DATABASE_URL !== testUrl) {
   throw new Error(
-    `Refusing to run tests against DATABASE_URL="${process.env.DATABASE_URL ?? ""}" — ` +
-      "expected the isolated file:./test.db (see server/vitest.config.ts).",
+    "Refusing to run DB tests: DATABASE_URL does not match TEST_DATABASE_URL. " +
+      "Point TEST_DATABASE_URL at a dedicated throwaway Postgres database.",
   );
 }

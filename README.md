@@ -8,28 +8,10 @@ plan adherence, and projected finish time as race day approaches.
 It's an installable **PWA** with a dark-first, mobile-first design — built to feel like a
 real running product, not an admin template.
 
-> ## ⚠️ Current state: local-storage preview build
->
-> The app currently runs **entirely in your browser** — no server, no database, no real
-> authentication. All persistence (profile, training plan, logged runs, preferences) lives
-> in `localStorage` behind a swappable adapter (`client/src/local/`). This exists so the
-> full UI flow — sign-up → onboarding → plan generation → calendar/dashboard → run logging
-> → settings — is clickable end-to-end with zero setup:
->
-> ```bash
-> npm install && npm run dev     # → http://localhost:5173, no env vars, no DB
-> ```
->
-> - The app launches **blank**: first load lands on the sign-up screen. "Sign-up" just
->   stores a local profile object (no password, no JWT) — clearly marked `TEMPORARY` in code.
-> - **Settings → Local data → "Reset all local data"** wipes every `pacemaker.*`
->   localStorage key and returns you to the blank sign-up state, so the flow can be
->   re-tested repeatedly.
-> - **Still to be wired for production:** real JWT + bcrypt auth against the Express API
->   (already implemented in `server/`, tests passing), real Prisma/SQLite persistence
->   (swap `client/src/api/endpoints.ts` back to the HTTP client), and a real model behind
->   the AI Coach scaffold (`client/src/lib/aiCoach.ts` — the `getCoachAdvice()` interface
->   is the drop-in seam). `npm run dev:full` starts API + client together for that work.
+**Persistence:** email/password accounts (bcrypt-hashed) and all training data live in a
+**Supabase (PostgreSQL)** database, accessed through the Express + Prisma API. Auth is
+JWT-in-httpOnly-cookie — the app does not use Supabase Auth, the anon key, or RLS. See
+[supabase/schema.sql](supabase/schema.sql) for the database schema.
 
 ## Features
 
@@ -56,7 +38,7 @@ real running product, not an admin template.
 
 | Layer      | Choices                                                                       |
 | ---------- | ----------------------------------------------------------------------------- |
-| Backend    | Node.js 20+, Express 4, Prisma ORM, SQLite, zod, JWT (httpOnly cookie), bcrypt |
+| Backend    | Node.js 20+, Express 4, Prisma ORM, PostgreSQL (Supabase), zod, JWT (httpOnly cookie), bcrypt |
 | Frontend   | React 18, Vite, Tailwind CSS, shadcn/ui, Recharts, React Router, PWA           |
 | Testing    | Vitest + Supertest                                                            |
 | Tooling    | TypeScript (ESM), ESLint, Prettier, npm workspaces                            |
@@ -64,32 +46,35 @@ real running product, not an admin template.
 
 ## Quickstart
 
-Prerequisites: **Node.js ≥ 20** and npm.
+Prerequisites: **Node.js ≥ 20**, npm, and a **Supabase** project (free tier is fine).
+
+**1. Set up the database (one time).** In your Supabase project, open **SQL Editor** and run
+[`supabase/schema.sql`](supabase/schema.sql) (or run `npm run db:deploy -w server` after
+step 3 to let Prisma create the tables via its migration).
+
+**2. Get your connection string.** Supabase dashboard → **Connect** → use the **Session
+pooler** URI (`…pooler.supabase.com:5432`). Avoid the "Direct connection" (IPv6-only).
 
 ```bash
-# 1. Install all workspace dependencies (root, server, client)
+# 3. Install dependencies, create the env file, and add your connection string
 npm install
-
-# 2. Create the server env file
 cp .env.example server/.env
+#   → edit server/.env: set DATABASE_URL to your Supabase session-pooler string
+#   → set JWT_SECRET to a long random value (openssl rand -base64 48)
 
-# 3. Create the SQLite database and apply migrations
-npm run db:migrate -w server
-
-# 4. Seed a demo account with a mid-plan training block and logged runs
-npm run db:seed
+# 4. Generate the Prisma client (and, optionally, create the tables via Prisma)
+npm run db:generate -w server
+npm run db:deploy   -w server   # optional if you already ran supabase/schema.sql
 
 # 5. Start the API (:3001) and the Vite dev server (:5173) together
 npm run dev
 ```
 
-Open **http://localhost:5173** and sign in with the demo account:
+Open **http://localhost:5173**, click **Create an account**, and register with email +
+password. Complete onboarding to generate your plan.
 
-- **Email:** `demo@pacemaker.run`
-- **Password:** `Demo1234!`
-
-The demo user is mid-plan with several weeks of logged runs, so the dashboard shows data
-immediately. Or register a fresh account and complete onboarding to generate your own plan.
+> Optional demo data: `SEED_DEMO=true npm run db:seed -w server` seeds a
+> `demo@pacemaker.run` / `Demo1234!` account with a mid-plan block of logged runs.
 
 ## Scripts
 
@@ -103,16 +88,16 @@ Run from the repo root:
 | `npm test`                   | Run the Vitest + Supertest suite                        |
 | `npm run lint`               | ESLint across both workspaces                           |
 | `npm run format`             | Prettier write                                          |
-| `npm run db:migrate -w server` | Create/apply migrations (dev)                         |
-| `npm run db:seed`            | Seed the demo user and plan                             |
+| `npm run db:deploy -w server`  | Apply Prisma migrations to the database               |
+| `npm run db:generate -w server`| Regenerate the Prisma client                          |
 
 ## Environment variables
 
 Copy `.env.example` to `server/.env`. Variables:
 
-| Variable       | Default                | Purpose                                                        |
+| Variable       | Example / default      | Purpose                                                        |
 | -------------- | ---------------------- | -------------------------------------------------------------- |
-| `DATABASE_URL` | `file:./dev.db`        | SQLite location (resolved relative to `server/prisma/`)        |
+| `DATABASE_URL` | `postgresql://…pooler.supabase.com:5432/postgres` | Supabase Postgres connection (session pooler) |
 | `JWT_SECRET`   | `dev-secret-change-me` | Secret for signing auth tokens — **set a strong value in prod** |
 | `PORT`         | `3001`                 | Port the API (and, in production, the whole app) listens on    |
 | `NODE_ENV`     | `development`          | `production` enables SPA static serving                        |
@@ -124,12 +109,17 @@ Copy `.env.example` to `server/.env`. Variables:
 npm test
 ```
 
-The suite (66 tests) covers **auth flows** (register/login/logout, cookie handling, error
-cases, protected-route guards), a **full API happy path** (onboarding → plan → workout edit
-→ run logging → stats), and the **plan-generator algorithm** (length clamping, phase
-distribution, weekly structure, long-run caps, overreach placement, race week, determinism).
-Tests run against an isolated `test.db` that is created and destroyed around each run — your
-`dev.db` is never touched.
+The **plan-generator** unit tests (length clamping, phase distribution, weekly structure,
+long-run caps, overreach placement, race week, determinism) always run — they're pure and
+need no database.
+
+The **DB-backed suites** (auth flows + full API happy path) run only when `TEST_DATABASE_URL`
+points at a **separate, throwaway** Postgres database (its tables are truncated on every run —
+never point it at your real database):
+
+```bash
+TEST_DATABASE_URL="postgresql://…pooler.supabase.com:5432/postgres" npm test
+```
 
 ## Production build (local)
 
@@ -141,30 +131,30 @@ NODE_ENV=production JWT_SECRET=change-me PORT=3001 npm start
 In production the single Node service serves the compiled API **and** the built React app
 (from `client/dist`) with SPA fallback — open http://localhost:3001.
 
-## Deployment — Railway
+## Deployment — Railway + Supabase
 
-Pacemaker deploys as a **single service** built from the `Dockerfile` (multi-stage
-`node:20-slim`). Steps:
+The database is **Supabase** (managed Postgres); the app deploys as a **single service**
+built from the `Dockerfile` (multi-stage `node:20-slim`). Steps:
 
-1. Create a new Railway project **from this repo**. Railway auto-detects the `Dockerfile`
+1. Provision the schema in Supabase once (run [`supabase/schema.sql`](supabase/schema.sql),
+   or let the container's `prisma migrate deploy` create the tables on first boot).
+2. Create a new Railway project **from this repo**. Railway auto-detects the `Dockerfile`
    (`railway.json` pins the builder and sets the healthcheck to `/api/health`).
-2. Add a **Volume mounted at `/data`** — SQLite persists to `file:/data/pacemaker.db`
-   (the Dockerfile's default `DATABASE_URL`). Without a volume, data resets on redeploy.
 3. Set environment variables:
-   - `JWT_SECRET` — **required**, a long random string.
+   - `DATABASE_URL` — **required**, your Supabase **session pooler** connection string.
+   - `JWT_SECRET` — **required**, a long random string (`openssl rand -base64 48`).
    - `SEED_DEMO=true` — optional, to seed the demo account on first boot.
    - `PORT` is provided by Railway automatically; the app honors it.
-4. Deploy. The container runs `prisma migrate deploy` (creating the DB on first boot) and
-   then starts the server. The healthcheck hits `/api/health`.
+4. Deploy. The container runs `prisma migrate deploy` (a no-op if the schema already exists)
+   then starts the server. No volume is needed — data lives in Supabase.
 
 ### Generic Docker
 
 ```bash
 docker build -t pacemaker .
 docker run -p 3001:3001 \
+  -e DATABASE_URL="postgresql://…pooler.supabase.com:5432/postgres" \
   -e JWT_SECRET=change-me \
-  -e SEED_DEMO=true \
-  -v pacemaker-data:/data \
   pacemaker
 ```
 

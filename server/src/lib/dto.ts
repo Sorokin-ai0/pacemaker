@@ -16,6 +16,7 @@ export interface ProfileDTO {
   currentWeeklyMileageKm: number;
   raceDate: string;
   longRunDay: number;
+  restDaysPerWeek: number;
 }
 
 export interface PlannedWorkoutDTO {
@@ -69,6 +70,7 @@ export function toProfileDTO(profile: Profile): ProfileDTO {
     currentWeeklyMileageKm: profile.currentWeeklyMileageKm,
     raceDate: toDateString(profile.raceDate),
     longRunDay: profile.longRunDay,
+    restDaysPerWeek: profile.restDaysPerWeek,
   };
 }
 

@@ -23,11 +23,11 @@ function PublicOnly({ children }: { children: ReactNode }) {
   return children;
 }
 
-/** Everything below requires a session. A blank first load lands on sign-up. */
+/** Everything below requires a session. */
 function RequireAuth() {
   const { user, loading } = useAuth();
   if (loading) return <Splash />;
-  if (!user) return <Navigate to="/register" replace />;
+  if (!user) return <Navigate to="/login" replace />;
   return <Outlet />;
 }
 

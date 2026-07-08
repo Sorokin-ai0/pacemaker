@@ -30,6 +30,7 @@ export interface PlanProfileInput {
   currentWeeklyMileageKm: number;
   raceDate: Date;
   longRunDay: number;
+  restDaysPerWeek?: 1 | 2;
 }
 
 /**
@@ -49,6 +50,7 @@ export async function replacePlan(
     experienceLevel: profile.experienceLevel,
     currentWeeklyMileageKm: profile.currentWeeklyMileageKm,
     longRunDay: profile.longRunDay,
+    restDaysPerWeek: profile.restDaysPerWeek,
   });
 
   await tx.trainingPlan.deleteMany({ where: { userId } });

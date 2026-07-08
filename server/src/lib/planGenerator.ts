@@ -23,6 +23,8 @@ export interface GeneratePlanInput {
   currentWeeklyMileageKm: number;
   /** Day of week for the long run: 0 = Sunday … 6 = Saturday. */
   longRunDay: number;
+  /** Rest days per non-race week: 2 (default) or 1 (the extra day becomes easy). */
+  restDaysPerWeek?: 1 | 2;
 }
 
 export interface GeneratedWorkout {
@@ -211,6 +213,7 @@ function computeLongRuns(
 export function generatePlan(input: GeneratePlanInput): GeneratedPlan {
   const today = utcMidnight(input.today);
   const longRunDay = ((Math.trunc(input.longRunDay) % 7) + 7) % 7;
+  const restDays = input.restDaysPerWeek === 1 ? 1 : 2;
 
   // --- 1. Plan length & anchoring -----------------------------------------
   const rawRace =
@@ -299,18 +302,22 @@ export function generatePlan(input: GeneratePlanInput): GeneratedPlan {
       continue;
     }
 
-    // Regular week: template anchored on the long-run day L.
-    // offset from L: 0=long · 1=rest · 2=easy · 3=quality · 4=easy · 5=rest · 6=easy
+    // Regular week: template anchored on the long-run day L. Offsets from L:
+    // 0=long · 1=rest · 2=easy · 3=quality · 4=easy · 6=easy
+    // 5=rest when restDaysPerWeek=2 (default), otherwise a 4th easy run.
     const volume = volumes[w];
     const long = longs[w];
     const quality = round1(Math.max(5, 0.15 * volume));
-    const easyEach = round1(Math.max(0, volume - long - quality) / 3);
+    const easyCount = restDays === 1 ? 4 : 3;
+    const easyEach = round1(Math.max(0, volume - long - quality) / easyCount);
     const qualityType: WorkoutType = w % 2 === 0 ? "tempo" : "speed";
     const qualityNotes = qualityType === "tempo" ? TEMPO_NOTES[phase] : SPEED_NOTES[phase];
 
     for (let d = 0; d < 7; d++) {
       const date = addDays(weekStart, d);
       const offset = (date.getUTCDay() - longRunDay + 7) % 7;
+      const isEasy =
+        offset === 2 || offset === 4 || offset === 6 || (offset === 5 && restDays === 1);
       let workout: GeneratedWorkout;
       if (offset === 0) {
         workout = {
@@ -335,7 +342,7 @@ export function generatePlan(input: GeneratePlanInput): GeneratedPlan {
           weekIndex: w,
           phase,
         };
-      } else if (offset === 2 || offset === 4 || offset === 6) {
+      } else if (isEasy) {
         workout = {
           date,
           type: "easy",

@@ -1,11 +1,10 @@
 import { addDays, format, parseISO } from "date-fns";
-import { Activity, HeartPulse, Loader2, LogOut, RefreshCw, Trash2, Watch } from "lucide-react";
+import { Activity, HeartPulse, Loader2, LogOut, RefreshCw, Watch } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { meApi, planApi, toApiError } from "@/api";
 import type { ExperienceLevel, Unit } from "@/api/types";
-import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { PageHeader } from "@/components/PageHeader";
 import { WeekdayPicker } from "@/components/WeekdayPicker";
 import { Button } from "@/components/ui/button";
@@ -33,7 +32,6 @@ import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from "@/context/auth";
 import { useDisplaySettings } from "@/context/settings";
 import { useTheme } from "@/context/theme";
-import { storage } from "@/local/storageAdapter";
 import { formatDistance, kmToUnit, unitLabel, unitToKm } from "@/lib/units";
 import { WEEKDAY_LABELS } from "@/lib/workouts";
 import { cn } from "@/lib/utils";
@@ -72,14 +70,7 @@ export function SettingsPage() {
   const { showSpeed, showHeartRate, setShowSpeed, setShowHeartRate } = useDisplaySettings();
   const [savingUnit, setSavingUnit] = useState(false);
   const [regenOpen, setRegenOpen] = useState(false);
-  const [resetOpen, setResetOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
-
-  /** Wipes every pacemaker.* localStorage key and restarts at blank sign-up. */
-  const handleResetAll = () => {
-    storage.clearAll();
-    window.location.assign("/register"); // full reload → fresh blank state
-  };
 
   const changeUnit = async (next: Unit) => {
     if (!user || next === user.unitPreference || savingUnit) return;
@@ -280,30 +271,11 @@ export function SettingsPage() {
           </CardContent>
         </Card>
 
-        {/* Local data (preview build) */}
-        <Card className="border-destructive/30">
-          <CardHeader>
-            <CardTitle>Local data</CardTitle>
-            <CardDescription>
-              This preview stores everything in your browser — no server, no database.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-xs text-muted-foreground">
-              Reset wipes your profile, plan, logged runs, and preferences, and returns to the blank
-              sign-up screen so you can walk the whole flow again.
-            </p>
-            <Button variant="destructive" onClick={() => setResetOpen(true)}>
-              <Trash2 aria-hidden="true" /> Reset all local data
-            </Button>
-          </CardContent>
-        </Card>
-
         {/* Account */}
         <Card>
           <CardHeader>
             <CardTitle>Account</CardTitle>
-            <CardDescription>Signed in as {user?.email} (local profile)</CardDescription>
+            <CardDescription>Signed in as {user?.email}</CardDescription>
           </CardHeader>
           <CardContent>
             <Button variant="outline" onClick={handleLogout} disabled={loggingOut}>
@@ -312,16 +284,6 @@ export function SettingsPage() {
           </CardContent>
         </Card>
       </div>
-
-      <ConfirmDialog
-        open={resetOpen}
-        onOpenChange={setResetOpen}
-        title="Reset all local data?"
-        description="Your profile, training plan, logged runs, and preferences will be permanently deleted from this browser. You'll start again from the blank sign-up screen."
-        confirmLabel="Reset everything"
-        destructive
-        onConfirm={handleResetAll}
-      />
 
       {profile && (
         <RegeneratePlanDialog

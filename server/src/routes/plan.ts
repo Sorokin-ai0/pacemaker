@@ -14,6 +14,7 @@ interface RegenerateBody {
   currentWeeklyMileageKm?: number;
   raceDate?: string; // normalized "YYYY-MM-DD"
   longRunDay?: number;
+  restDaysPerWeek?: 1 | 2;
 }
 
 export const planRouter = Router();
@@ -45,6 +46,7 @@ planRouter.post(
       raceDate:
         body.raceDate !== undefined ? (parseDateString(body.raceDate) as Date) : current.raceDate,
       longRunDay: body.longRunDay ?? current.longRunDay,
+      restDaysPerWeek: (body.restDaysPerWeek ?? current.restDaysPerWeek) as 1 | 2,
     };
     const today = new Date();
 

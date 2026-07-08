@@ -13,6 +13,7 @@ interface OnboardingBody {
   currentWeeklyMileageKm: number;
   raceDate: string; // normalized "YYYY-MM-DD"
   longRunDay: number;
+  restDaysPerWeek?: 1 | 2;
 }
 
 export const onboardingRouter = Router();
@@ -28,11 +29,13 @@ onboardingRouter.post(
     const today = new Date();
 
     const { profile, plan } = await prisma.$transaction(async (tx) => {
+      const restDaysPerWeek = body.restDaysPerWeek === 1 ? 1 : 2;
       const profileData = {
         experienceLevel: body.experienceLevel,
         currentWeeklyMileageKm: body.currentWeeklyMileageKm,
         raceDate,
         longRunDay: body.longRunDay,
+        restDaysPerWeek,
       };
       const profile = await tx.profile.upsert({
         where: { userId: req.userId },
@@ -47,6 +50,7 @@ onboardingRouter.post(
           currentWeeklyMileageKm: body.currentWeeklyMileageKm,
           raceDate,
           longRunDay: body.longRunDay,
+          restDaysPerWeek,
         },
         today,
       );

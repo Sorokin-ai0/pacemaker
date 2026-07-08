@@ -1,15 +1,16 @@
-// Pacemaker — Prisma schema (SQLite)
+// Pacemaker — Prisma schema (PostgreSQL / Supabase)
 //
-// SQLite does not support native enums via Prisma, so constrained values are
-// plain String fields with allowed values documented below. Enforcement is
-// app-level (zod validation in the API layer).
+// Constrained values are plain String fields with allowed values documented
+// below; enforcement is app-level (zod validation in the API layer). Auth
+// (bcrypt password hashing + JWT) is handled by the Express API — this schema
+// does not use Supabase Auth / auth.users / RLS.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -35,6 +36,8 @@ model Profile {
   raceDate               DateTime
   /// Day of week for the long run: 0 = Sunday … 6 = Saturday (JS Date.getDay())
   longRunDay             Int
+  /// Rest days per non-race week: 1 or 2 (default 2)
+  restDaysPerWeek        Int      @default(2)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

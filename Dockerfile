@@ -29,8 +29,8 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3001
-# SQLite lives on the mounted volume so data survives redeploys.
-ENV DATABASE_URL="file:/data/pacemaker.db"
+# DATABASE_URL (Supabase Postgres) and JWT_SECRET are provided by the host env
+# (e.g. Railway variables) — never baked into the image.
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl \
@@ -51,9 +51,8 @@ COPY --from=build /app/server/dist ./server/dist
 COPY --from=build /app/server/prisma ./server/prisma
 COPY --from=build /app/client/dist ./client/dist
 
-VOLUME /data
 EXPOSE 3001
 
-# Apply migrations (creates the DB on first boot), then start the single service.
-# index.js seeds demo data itself when SEED_DEMO=true and the DB is empty.
+# Apply any pending migrations to the Supabase Postgres DB, then start the single
+# service. index.js seeds demo data itself when SEED_DEMO=true and the DB is empty.
 CMD ["sh", "-c", "npx prisma migrate deploy --schema server/prisma/schema.prisma && node server/dist/index.js"]

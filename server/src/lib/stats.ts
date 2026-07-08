@@ -87,7 +87,10 @@ export function buildStats({ plan, runs, today: now }: BuildStatsInput): StatsDT
     }
     let loggedKm = 0;
     for (const run of runs) {
-      if (run.date.getTime() >= weekStart.getTime() && run.date.getTime() < weekEndExclusive.getTime()) {
+      if (
+        run.date.getTime() >= weekStart.getTime() &&
+        run.date.getTime() < weekEndExclusive.getTime()
+      ) {
         loggedKm += run.distanceKm;
       }
     }
