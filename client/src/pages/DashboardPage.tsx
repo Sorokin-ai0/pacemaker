@@ -16,6 +16,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { PaceTrendChart } from "@/components/charts/PaceTrendChart";
 import { WeeklyMileageChart } from "@/components/charts/WeeklyMileageChart";
 import { PageHeader } from "@/components/PageHeader";
+import { CoachCard } from "@/components/CoachCard";
 import { RaceCountdown } from "@/components/RaceCountdown";
 import { StatCard } from "@/components/StatCard";
 import { TaperBanner } from "@/components/TaperBanner";
@@ -124,6 +125,8 @@ export function DashboardPage() {
 
       <div className="space-y-4">
         {s.taper.active && <TaperBanner />}
+
+        <CoachCard stats={s} />
 
         <div className="grid gap-4 lg:grid-cols-3">
           <RaceCountdown

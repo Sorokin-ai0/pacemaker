@@ -57,7 +57,11 @@ export const createRunSchema = z.object({
   avgHeartRate: z.number().int().min(30).max(250).nullable().optional(),
   rpe: z.number().int().min(1).max(10).nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
-  plannedWorkoutId: z.string().min(1).nullable().optional(),
+  // "" is treated as "no link" — some select components emit empty strings.
+  plannedWorkoutId: z.preprocess(
+    (v) => (v === "" ? null : v),
+    z.string().min(1).nullable().optional(),
+  ),
 });
 
 export const patchRunSchema = createRunSchema.partial();

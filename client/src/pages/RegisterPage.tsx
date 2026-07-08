@@ -11,13 +11,19 @@ import { useAuth } from "@/context/auth";
 
 const EMAIL_RE = /\S+@\S+\.\S+/;
 
+/**
+ * LOCAL PREVIEW SIGN-UP — TEMPORARY.
+ * Saves a profile object to localStorage and treats it as "signed in".
+ * No password, no hashing, no JWT — to be replaced with the real
+ * register endpoint (server/src/routes/auth.ts) when the backend is wired in.
+ */
 export function RegisterPage() {
   const { register } = useAuth();
   const navigate = useNavigate();
 
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
+  const [fieldErrors, setFieldErrors] = useState<{ email?: string }>({});
   const [apiError, setApiError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -25,14 +31,13 @@ export function RegisterPage() {
     e.preventDefault();
     const errors: typeof fieldErrors = {};
     if (!EMAIL_RE.test(email.trim())) errors.email = "Enter a valid email address.";
-    if (password.length < 8) errors.password = "Password must be at least 8 characters.";
     setFieldErrors(errors);
     setApiError(null);
     if (Object.keys(errors).length > 0) return;
 
     setSubmitting(true);
     try {
-      await register(email.trim(), password);
+      await register(email.trim(), name);
       navigate("/onboarding", { replace: true });
     } catch (err) {
       setApiError(toApiError(err).message);
@@ -45,7 +50,7 @@ export function RegisterPage() {
       <Logo />
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="text-xl">Create your account</CardTitle>
+          <CardTitle className="text-xl">Create your profile</CardTitle>
           <CardDescription>
             Thirteen point one miles. One plan, built around your race day.
           </CardDescription>
@@ -61,6 +66,17 @@ export function RegisterPage() {
               </div>
             )}
             <div className="space-y-2">
+              <Label htmlFor="name">Name</Label>
+              <Input
+                id="name"
+                type="text"
+                autoComplete="name"
+                placeholder="Optional"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
@@ -73,32 +89,20 @@ export function RegisterPage() {
               />
               {fieldErrors.email && <p className="text-xs text-destructive">{fieldErrors.email}</p>}
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                autoComplete="new-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                aria-invalid={fieldErrors.password ? true : undefined}
-              />
-              <p className="text-xs text-muted-foreground">At least 8 characters.</p>
-              {fieldErrors.password && (
-                <p className="text-xs text-destructive">{fieldErrors.password}</p>
-              )}
-            </div>
             <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? "Creating account…" : "Create account"}
+              {submitting ? "Creating profile…" : "Create profile & continue"}
             </Button>
+            <p className="text-center text-xs text-muted-foreground">
+              Preview build — your data stays in this browser (no account, no server).
+            </p>
           </form>
           <p className="mt-4 text-center text-sm text-muted-foreground">
-            Already have an account?{" "}
+            Already set up on this device?{" "}
             <Link
               to="/login"
               className="font-medium text-primary underline-offset-4 hover:underline"
             >
-              Sign in
+              Continue
             </Link>
           </p>
         </CardContent>

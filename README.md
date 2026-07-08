@@ -8,6 +8,29 @@ plan adherence, and projected finish time as race day approaches.
 It's an installable **PWA** with a dark-first, mobile-first design — built to feel like a
 real running product, not an admin template.
 
+> ## ⚠️ Current state: local-storage preview build
+>
+> The app currently runs **entirely in your browser** — no server, no database, no real
+> authentication. All persistence (profile, training plan, logged runs, preferences) lives
+> in `localStorage` behind a swappable adapter (`client/src/local/`). This exists so the
+> full UI flow — sign-up → onboarding → plan generation → calendar/dashboard → run logging
+> → settings — is clickable end-to-end with zero setup:
+>
+> ```bash
+> npm install && npm run dev     # → http://localhost:5173, no env vars, no DB
+> ```
+>
+> - The app launches **blank**: first load lands on the sign-up screen. "Sign-up" just
+>   stores a local profile object (no password, no JWT) — clearly marked `TEMPORARY` in code.
+> - **Settings → Local data → "Reset all local data"** wipes every `pacemaker.*`
+>   localStorage key and returns you to the blank sign-up state, so the flow can be
+>   re-tested repeatedly.
+> - **Still to be wired for production:** real JWT + bcrypt auth against the Express API
+>   (already implemented in `server/`, tests passing), real Prisma/SQLite persistence
+>   (swap `client/src/api/endpoints.ts` back to the HTTP client), and a real model behind
+>   the AI Coach scaffold (`client/src/lib/aiCoach.ts` — the `getCoachAdvice()` interface
+>   is the drop-in seam). `npm run dev:full` starts API + client together for that work.
+
 ## Features
 
 - **Onboarding → instant plan.** Race date, current weekly mileage, experience level, and

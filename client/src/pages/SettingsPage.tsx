@@ -1,10 +1,11 @@
 import { addDays, format, parseISO } from "date-fns";
-import { Activity, HeartPulse, Loader2, LogOut, RefreshCw, Watch } from "lucide-react";
+import { Activity, HeartPulse, Loader2, LogOut, RefreshCw, Trash2, Watch } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { meApi, planApi, toApiError } from "@/api";
 import type { ExperienceLevel, Unit } from "@/api/types";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { PageHeader } from "@/components/PageHeader";
 import { WeekdayPicker } from "@/components/WeekdayPicker";
 import { Button } from "@/components/ui/button";
@@ -30,7 +31,9 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from "@/context/auth";
+import { useDisplaySettings } from "@/context/settings";
 import { useTheme } from "@/context/theme";
+import { storage } from "@/local/storageAdapter";
 import { formatDistance, kmToUnit, unitLabel, unitToKm } from "@/lib/units";
 import { WEEKDAY_LABELS } from "@/lib/workouts";
 import { cn } from "@/lib/utils";
@@ -66,9 +69,17 @@ export function SettingsPage() {
   const navigate = useNavigate();
 
   const unit = user?.unitPreference ?? "mi";
+  const { showSpeed, showHeartRate, setShowSpeed, setShowHeartRate } = useDisplaySettings();
   const [savingUnit, setSavingUnit] = useState(false);
   const [regenOpen, setRegenOpen] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+
+  /** Wipes every pacemaker.* localStorage key and restarts at blank sign-up. */
+  const handleResetAll = () => {
+    storage.clearAll();
+    window.location.assign("/register"); // full reload → fresh blank state
+  };
 
   const changeUnit = async (next: Unit) => {
     if (!user || next === user.unitPreference || savingUnit) return;
@@ -162,6 +173,41 @@ export function SettingsPage() {
           </CardContent>
         </Card>
 
+        {/* Display */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Display</CardTitle>
+            <CardDescription>What run metrics look like across the app.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <Label htmlFor="show-speed" className="font-normal">
+                  Show speed instead of pace
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {showSpeed
+                    ? `Speed (${unit === "mi" ? "mph" : "km/h"})`
+                    : `Pace (min per ${unitLabel(unit)})`}
+                </p>
+              </div>
+              <Switch id="show-speed" checked={showSpeed} onCheckedChange={setShowSpeed} />
+            </div>
+            <Separator />
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <Label htmlFor="show-hr" className="font-normal">
+                  Heart-rate fields
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Show avg HR in run logging and run cards.
+                </p>
+              </div>
+              <Switch id="show-hr" checked={showHeartRate} onCheckedChange={setShowHeartRate} />
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Training plan */}
         <Card>
           <CardHeader>
@@ -191,11 +237,19 @@ export function SettingsPage() {
                   <dt className="text-muted-foreground">Long-run day</dt>
                   <dd className="font-medium">{WEEKDAY_LABELS[profile.longRunDay]}</dd>
                 </div>
+                <div className="flex items-center justify-between gap-4 sm:justify-start sm:gap-3">
+                  <dt className="text-muted-foreground">Rest days / week</dt>
+                  <dd className="font-medium tabular-nums">{profile.restDaysPerWeek ?? 2}</dd>
+                </div>
               </dl>
             ) : (
               <p className="text-sm text-muted-foreground">No training profile yet.</p>
             )}
             <Separator />
+            <p className="text-xs text-muted-foreground">
+              Change any input — race date, volume, level, long-run day, rest days — and rebuild the
+              plan at any time.
+            </p>
             <Button variant="outline" onClick={() => setRegenOpen(true)} disabled={!profile}>
               <RefreshCw aria-hidden="true" /> Regenerate plan
             </Button>
@@ -226,11 +280,30 @@ export function SettingsPage() {
           </CardContent>
         </Card>
 
+        {/* Local data (preview build) */}
+        <Card className="border-destructive/30">
+          <CardHeader>
+            <CardTitle>Local data</CardTitle>
+            <CardDescription>
+              This preview stores everything in your browser — no server, no database.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Reset wipes your profile, plan, logged runs, and preferences, and returns to the blank
+              sign-up screen so you can walk the whole flow again.
+            </p>
+            <Button variant="destructive" onClick={() => setResetOpen(true)}>
+              <Trash2 aria-hidden="true" /> Reset all local data
+            </Button>
+          </CardContent>
+        </Card>
+
         {/* Account */}
         <Card>
           <CardHeader>
             <CardTitle>Account</CardTitle>
-            <CardDescription>Signed in as {user?.email}</CardDescription>
+            <CardDescription>Signed in as {user?.email} (local profile)</CardDescription>
           </CardHeader>
           <CardContent>
             <Button variant="outline" onClick={handleLogout} disabled={loggingOut}>
@@ -239,6 +312,16 @@ export function SettingsPage() {
           </CardContent>
         </Card>
       </div>
+
+      <ConfirmDialog
+        open={resetOpen}
+        onOpenChange={setResetOpen}
+        title="Reset all local data?"
+        description="Your profile, training plan, logged runs, and preferences will be permanently deleted from this browser. You'll start again from the blank sign-up screen."
+        confirmLabel="Reset everything"
+        destructive
+        onConfirm={handleResetAll}
+      />
 
       {profile && (
         <RegeneratePlanDialog
@@ -252,6 +335,7 @@ export function SettingsPage() {
             ),
             level: profile.experienceLevel,
             longRunDay: profile.longRunDay,
+            restDays: profile.restDaysPerWeek ?? 2,
           }}
         />
       )}
@@ -264,6 +348,7 @@ interface RegenerateInitial {
   weeklyMileage: string;
   level: ExperienceLevel;
   longRunDay: number;
+  restDays: 1 | 2;
 }
 
 function RegeneratePlanDialog({
@@ -284,6 +369,7 @@ function RegeneratePlanDialog({
   const [weeklyMileage, setWeeklyMileage] = useState(initial.weeklyMileage);
   const [level, setLevel] = useState<ExperienceLevel>(initial.level);
   const [longRunDay, setLongRunDay] = useState(initial.longRunDay);
+  const [restDays, setRestDays] = useState<1 | 2>(initial.restDays);
   const [submitting, setSubmitting] = useState(false);
 
   // Re-prefill from the current profile every time the dialog opens.
@@ -296,6 +382,7 @@ function RegeneratePlanDialog({
     setWeeklyMileage(i.weeklyMileage);
     setLevel(i.level);
     setLongRunDay(i.longRunDay);
+    setRestDays(i.restDays);
   }, [open]);
 
   const minDate = format(addDays(new Date(), 1), "yyyy-MM-dd");
@@ -318,6 +405,7 @@ function RegeneratePlanDialog({
         currentWeeklyMileageKm: unitToKm(mileage, unit),
         raceDate,
         longRunDay,
+        restDaysPerWeek: restDays,
       });
       applyProfile(result.profile);
       onOpenChange(false);
@@ -393,6 +481,22 @@ function RegeneratePlanDialog({
           <div className="space-y-2">
             <span className="text-sm font-medium leading-none">Preferred long-run day</span>
             <WeekdayPicker value={longRunDay} onChange={setLongRunDay} disabled={submitting} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="regen-rest-days">Rest days per week</Label>
+            <Select
+              value={String(restDays)}
+              onValueChange={(v) => setRestDays(v === "1" ? 1 : 2)}
+              disabled={submitting}
+            >
+              <SelectTrigger id="regen-rest-days">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="2">2 rest days (recommended)</SelectItem>
+                <SelectItem value="1">1 rest day (extra easy run)</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <DialogFooter className="pt-2">
             <Button

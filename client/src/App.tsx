@@ -5,6 +5,7 @@ import { AppShell, Splash } from "@/components/layout/AppShell";
 import { Toaster } from "@/components/ui/toaster";
 import { useAuth } from "@/context/auth";
 import { AuthProvider } from "@/context/AuthProvider";
+import { SettingsProvider } from "@/context/SettingsProvider";
 import { ThemeProvider } from "@/context/ThemeProvider";
 import { CalendarPage } from "@/pages/CalendarPage";
 import { DashboardPage } from "@/pages/DashboardPage";
@@ -22,11 +23,11 @@ function PublicOnly({ children }: { children: ReactNode }) {
   return children;
 }
 
-/** Everything below requires a session. */
+/** Everything below requires a session. A blank first load lands on sign-up. */
 function RequireAuth() {
   const { user, loading } = useAuth();
   if (loading) return <Splash />;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/register" replace />;
   return <Outlet />;
 }
 
@@ -40,47 +41,49 @@ function RequireProfile() {
 export default function App() {
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route
-              path="/login"
-              element={
-                <PublicOnly>
-                  <LoginPage />
-                </PublicOnly>
-              }
-            />
-            <Route
-              path="/register"
-              element={
-                <PublicOnly>
-                  <RegisterPage />
-                </PublicOnly>
-              }
-            />
+      <SettingsProvider>
+        <AuthProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route
+                path="/login"
+                element={
+                  <PublicOnly>
+                    <LoginPage />
+                  </PublicOnly>
+                }
+              />
+              <Route
+                path="/register"
+                element={
+                  <PublicOnly>
+                    <RegisterPage />
+                  </PublicOnly>
+                }
+              />
 
-            <Route element={<RequireAuth />}>
-              {/* Onboarding is reachable with or without a profile (re-onboarding
+              <Route element={<RequireAuth />}>
+                {/* Onboarding is reachable with or without a profile (re-onboarding
                   recovers a missing plan); users without one are forced here. */}
-              <Route path="/onboarding" element={<OnboardingPage />} />
+                <Route path="/onboarding" element={<OnboardingPage />} />
 
-              <Route element={<RequireProfile />}>
-                <Route element={<AppShell />}>
-                  <Route path="/dashboard" element={<DashboardPage />} />
-                  <Route path="/calendar" element={<CalendarPage />} />
-                  <Route path="/log" element={<RunLogPage />} />
-                  <Route path="/settings" element={<SettingsPage />} />
+                <Route element={<RequireProfile />}>
+                  <Route element={<AppShell />}>
+                    <Route path="/dashboard" element={<DashboardPage />} />
+                    <Route path="/calendar" element={<CalendarPage />} />
+                    <Route path="/log" element={<RunLogPage />} />
+                    <Route path="/settings" element={<SettingsPage />} />
+                  </Route>
                 </Route>
               </Route>
-            </Route>
 
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
-          </Routes>
-        </BrowserRouter>
-        <Toaster />
-      </AuthProvider>
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            </Routes>
+          </BrowserRouter>
+          <Toaster />
+        </AuthProvider>
+      </SettingsProvider>
     </ThemeProvider>
   );
 }

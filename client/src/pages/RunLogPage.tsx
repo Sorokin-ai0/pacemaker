@@ -16,12 +16,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from "@/context/auth";
+import { useDisplaySettings } from "@/context/settings";
 import { useApi } from "@/hooks/use-api";
 import { formatDistance, formatDuration } from "@/lib/units";
 import { WORKOUT_META, WEEKDAY_SHORT } from "@/lib/workouts";
 
 export function RunLogPage() {
   const { user } = useAuth();
+  const { showHeartRate } = useDisplaySettings();
   const unit = user?.unitPreference ?? "mi";
   const { toast } = useToast();
 
@@ -164,7 +166,7 @@ export function RunLogPage() {
                           unit={unit}
                           className="text-sm font-medium"
                         />
-                        {run.avgHeartRate !== null && (
+                        {showHeartRate && run.avgHeartRate !== null && (
                           <span className="flex items-center gap-1 text-sm text-muted-foreground tabular-nums">
                             <Heart className="size-3.5 text-rose-500" aria-hidden="true" />
                             {run.avgHeartRate} bpm

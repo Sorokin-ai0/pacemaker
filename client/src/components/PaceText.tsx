@@ -1,5 +1,6 @@
 import type { Unit } from "@/api/types";
-import { formatPace } from "@/lib/units";
+import { useDisplaySettings } from "@/context/settings";
+import { formatPaceOrSpeed } from "@/lib/units";
 import { cn } from "@/lib/utils";
 
 interface PaceTextProps {
@@ -9,7 +10,15 @@ interface PaceTextProps {
   className?: string;
 }
 
-/** Formats an API pace (sec/km) as m:ss per the user's display unit. */
+/**
+ * Formats an API pace (sec/km) per the user's display unit — as m:ss pace by
+ * default, or as speed (mph / km/h) when the Settings → Display toggle is on.
+ */
 export function PaceText({ secPerKm, unit, className }: PaceTextProps) {
-  return <span className={cn("tabular-nums", className)}>{formatPace(secPerKm, unit)}</span>;
+  const { showSpeed } = useDisplaySettings();
+  return (
+    <span className={cn("tabular-nums", className)}>
+      {formatPaceOrSpeed(secPerKm, unit, showSpeed)}
+    </span>
+  );
 }

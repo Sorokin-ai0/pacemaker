@@ -43,8 +43,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const nextUser = await authApi.login(email, password);
+  // LOCAL PREVIEW AUTH — no passwords/JWT; see src/local/localBackend.ts.
+  const login = useCallback(async (email: string) => {
+    const nextUser = await authApi.login(email);
     setUser(nextUser);
     if (nextUser.hasProfile) {
       try {
@@ -58,8 +59,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const register = useCallback(async (email: string, password: string) => {
-    const nextUser = await authApi.register(email, password);
+  const register = useCallback(async (email: string, name: string) => {
+    const nextUser = await authApi.register(email, name);
     setUser(nextUser);
     setProfile(null);
   }, []);

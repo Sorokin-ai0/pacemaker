@@ -7,8 +7,10 @@ export interface AuthContextValue {
   profile: ProfileDTO | null;
   /** True only during the initial /api/auth/me boot check. */
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string) => Promise<void>;
+  /** LOCAL PREVIEW: no password — re-activates the stored local profile. */
+  login: (email: string) => Promise<void>;
+  /** LOCAL PREVIEW: creates a local profile object and treats it as signed in. */
+  register: (email: string, name: string) => Promise<void>;
   logout: () => Promise<void>;
   /** Re-fetches /api/auth/me. */
   refresh: () => Promise<void>;

@@ -26,7 +26,8 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/use-toast";
-import { formatPace, kmToUnit, unitLabel, unitToKm } from "@/lib/units";
+import { useDisplaySettings } from "@/context/settings";
+import { formatPaceOrSpeed, kmToUnit, unitLabel, unitToKm } from "@/lib/units";
 import { WORKOUT_META, WEEKDAY_SHORT } from "@/lib/workouts";
 
 const NONE_VALUE = "none";
@@ -55,6 +56,7 @@ export function RunDialog({
   onSaved,
 }: RunDialogProps) {
   const { toast } = useToast();
+  const { showSpeed, showHeartRate } = useDisplaySettings();
 
   const [date, setDate] = useState("");
   const [distance, setDistance] = useState("");
@@ -126,8 +128,9 @@ export function RunDialog({
   const durationSeconds = durationPartsToSeconds(duration);
   const pacePreview =
     Number.isFinite(distanceValue) && distanceValue > 0 && durationSeconds > 0
-      ? formatPace(durationSeconds / unitToKm(distanceValue, unit), unit)
+      ? formatPaceOrSpeed(durationSeconds / unitToKm(distanceValue, unit), unit, showSpeed)
       : null;
+  const paceLabel = showSpeed ? "Speed" : "Pace";
 
   const validate = (): boolean => {
     const errors: typeof fieldErrors = {};
@@ -154,10 +157,16 @@ export function RunDialog({
       date,
       distanceKm: unitToKm(distanceValue, unit),
       durationSeconds,
-      avgHeartRate: heartRate.trim() === "" ? null : Number(heartRate),
+      // HR hidden by the display toggle → keep whatever the run already had.
+      avgHeartRate: showHeartRate
+        ? heartRate.trim() === ""
+          ? null
+          : Number(heartRate)
+        : (run?.avgHeartRate ?? null),
       rpe,
       notes: notes.trim() === "" ? null : notes.trim(),
-      plannedWorkoutId: workoutId === NONE_VALUE ? null : workoutId,
+      // Guard against Radix Select resetting to "" when options re-render.
+      plannedWorkoutId: workoutId && workoutId !== NONE_VALUE ? workoutId : null,
     };
     try {
       const saved = run ? await runsApi.update(run.id, body) : await runsApi.create(body);
@@ -235,11 +244,11 @@ export function RunDialog({
               <p className="text-sm text-muted-foreground" aria-live="polite">
                 {pacePreview ? (
                   <>
-                    Pace{" "}
+                    {paceLabel}{" "}
                     <span className="font-medium text-foreground tabular-nums">{pacePreview}</span>
                   </>
                 ) : (
-                  "Pace appears here"
+                  `${paceLabel} appears here`
                 )}
               </p>
             </div>
@@ -248,27 +257,29 @@ export function RunDialog({
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="run-hr">Avg heart rate</Label>
-              <Input
-                id="run-hr"
-                type="number"
-                inputMode="numeric"
-                min="30"
-                max="250"
-                placeholder="Optional"
-                value={heartRate}
-                onChange={(e) => setHeartRate(e.target.value)}
-                aria-invalid={fieldErrors.heartRate ? true : undefined}
-              />
-              {fieldErrors.heartRate && (
-                <p className="text-xs text-destructive">{fieldErrors.heartRate}</p>
-              )}
-            </div>
+          <div className={showHeartRate ? "grid grid-cols-2 gap-4" : "grid grid-cols-1 gap-4"}>
+            {showHeartRate && (
+              <div className="space-y-2">
+                <Label htmlFor="run-hr">Avg heart rate</Label>
+                <Input
+                  id="run-hr"
+                  type="number"
+                  inputMode="numeric"
+                  min="30"
+                  max="250"
+                  placeholder="Optional"
+                  value={heartRate}
+                  onChange={(e) => setHeartRate(e.target.value)}
+                  aria-invalid={fieldErrors.heartRate ? true : undefined}
+                />
+                {fieldErrors.heartRate && (
+                  <p className="text-xs text-destructive">{fieldErrors.heartRate}</p>
+                )}
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="run-workout">Fulfills planned workout</Label>
-              <Select value={workoutId} onValueChange={setWorkoutId}>
+              <Select value={workoutId || NONE_VALUE} onValueChange={setWorkoutId}>
                 <SelectTrigger id="run-workout">
                   <SelectValue />
                 </SelectTrigger>

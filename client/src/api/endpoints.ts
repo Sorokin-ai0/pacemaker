@@ -1,4 +1,18 @@
-import { apiFetch } from "@/api/http";
+/**
+ * ╔══════════════════════════════════════════════════════════════════════════╗
+ * ║ TEMPORARY: LOCAL-STORAGE PREVIEW MODE                                     ║
+ * ║                                                                          ║
+ * ║ Every "API" below delegates to src/local/localBackend.ts — data lives in ║
+ * ║ browser localStorage; there is NO server, NO database, and NO real auth. ║
+ * ║                                                                          ║
+ * ║ To restore the real backend (Express + Prisma + JWT, already implemented ║
+ * ║ in server/): re-implement these objects with `apiFetch` from             ║
+ * ║ src/api/http.ts against the routes in API_CONTRACT.md (see git history   ║
+ * ║ for the original HTTP version of this file) and delete src/local/.       ║
+ * ║ Signatures and DTO shapes are identical, so no component changes.        ║
+ * ╚══════════════════════════════════════════════════════════════════════════╝
+ */
+
 import type {
   LoggedRunDTO,
   OnboardingBody,
@@ -13,95 +27,81 @@ import type {
   UserDTO,
   WorkoutPatchBody,
 } from "@/api/types";
+import {
+  localAuth,
+  localMe,
+  localOnboarding,
+  localPlan,
+  localRuns,
+  localStats,
+  localWorkouts,
+} from "@/local/localBackend";
 
 export const authApi = {
-  register(email: string, password: string): Promise<UserDTO> {
-    return apiFetch<{ user: UserDTO }>("/api/auth/register", {
-      method: "POST",
-      body: { email, password },
-      on401: "ignore",
-    }).then((r) => r.user);
+  /** LOCAL PREVIEW: no password — just stores a profile object. */
+  register(email: string, name: string): Promise<UserDTO> {
+    return localAuth.register(email, name);
   },
-  login(email: string, password: string): Promise<UserDTO> {
-    return apiFetch<{ user: UserDTO }>("/api/auth/login", {
-      method: "POST",
-      body: { email, password },
-      on401: "ignore",
-    }).then((r) => r.user);
+  /** LOCAL PREVIEW: "login" re-activates the stored local profile. */
+  login(email: string): Promise<UserDTO> {
+    return localAuth.login(email);
   },
   logout(): Promise<void> {
-    return apiFetch<undefined>("/api/auth/logout", { method: "POST", on401: "ignore" }).then(
-      () => undefined,
-    );
+    return localAuth.logout();
   },
   me(): Promise<{ user: UserDTO; profile: ProfileDTO | null }> {
-    return apiFetch<{ user: UserDTO; profile: ProfileDTO | null }>("/api/auth/me", {
-      on401: "ignore",
-    });
+    return localAuth.me();
+  },
+  /** Read-only peek for the login screen. Local preview only. */
+  peekUser(): { email: string; name: string } | null {
+    return localAuth.peekUser();
   },
 };
 
 export const meApi = {
   update(body: { unitPreference: Unit }): Promise<UserDTO> {
-    return apiFetch<{ user: UserDTO }>("/api/me", { method: "PATCH", body }).then((r) => r.user);
+    return localMe.update(body);
   },
 };
 
 export const onboardingApi = {
   submit(body: OnboardingBody): Promise<{ profile: ProfileDTO; plan: PlanDTO }> {
-    return apiFetch<{ profile: ProfileDTO; plan: PlanDTO }>("/api/onboarding", {
-      method: "POST",
-      body,
-    });
+    return localOnboarding.submit(body);
   },
 };
 
 export const planApi = {
   get(): Promise<PlanDTO | null> {
-    return apiFetch<{ plan: PlanDTO | null }>("/api/plan").then((r) => r.plan);
+    return localPlan.get();
   },
   regenerate(body: RegenerateBody): Promise<{ profile: ProfileDTO; plan: PlanDTO }> {
-    return apiFetch<{ profile: ProfileDTO; plan: PlanDTO }>("/api/plan/regenerate", {
-      method: "POST",
-      body,
-    });
+    return localPlan.regenerate(body);
   },
 };
 
 export const workoutsApi = {
   update(id: string, body: WorkoutPatchBody): Promise<PlannedWorkoutDTO> {
-    return apiFetch<{ workout: PlannedWorkoutDTO }>(`/api/workouts/${id}`, {
-      method: "PATCH",
-      body,
-    }).then((r) => r.workout);
+    return localWorkouts.update(id, body);
   },
 };
 
 export const runsApi = {
   list(params?: { from?: string; to?: string }): Promise<LoggedRunDTO[]> {
-    const query = new URLSearchParams();
-    if (params?.from) query.set("from", params.from);
-    if (params?.to) query.set("to", params.to);
-    const qs = query.toString();
-    return apiFetch<{ runs: LoggedRunDTO[] }>(`/api/runs${qs ? `?${qs}` : ""}`).then((r) => r.runs);
+    return localRuns.list(params);
   },
   create(body: RunCreateBody): Promise<LoggedRunDTO> {
-    return apiFetch<{ run: LoggedRunDTO }>("/api/runs", { method: "POST", body }).then(
-      (r) => r.run,
-    );
+    return localRuns.create(body);
   },
   update(id: string, body: RunPatchBody): Promise<LoggedRunDTO> {
-    return apiFetch<{ run: LoggedRunDTO }>(`/api/runs/${id}`, { method: "PATCH", body }).then(
-      (r) => r.run,
-    );
+    return localRuns.update(id, body);
   },
   remove(id: string): Promise<void> {
-    return apiFetch<undefined>(`/api/runs/${id}`, { method: "DELETE" }).then(() => undefined);
+    return localRuns.remove(id);
   },
 };
 
 export const statsApi = {
   get(): Promise<StatsDTO> {
-    return apiFetch<StatsDTO>("/api/stats");
+    return localStats.get();
   },
 };

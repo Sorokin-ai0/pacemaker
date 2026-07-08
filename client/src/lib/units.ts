@@ -51,6 +51,17 @@ export function formatPace(secPerKm: number, unit: Unit): string {
   return `${formatPaceClock(paceSecPerUnit(secPerKm, unit))} /${unitLabel(unit)}`;
 }
 
+/** "7.4 mph" / "11.9 km/h" — same underlying pace, shown as speed. */
+export function formatSpeed(secPerKm: number, unit: Unit): string {
+  const unitsPerHour = 3600 / paceSecPerUnit(secPerKm, unit);
+  return `${unitsPerHour.toFixed(1)} ${unit === "mi" ? "mph" : "km/h"}`;
+}
+
+/** Pace or speed per the display preference (see Settings → Display). */
+export function formatPaceOrSpeed(secPerKm: number, unit: Unit, showSpeed: boolean): string {
+  return showSpeed ? formatSpeed(secPerKm, unit) : formatPace(secPerKm, unit);
+}
+
 /** "1:45:30" when ≥ 1h, otherwise "45:30". */
 export function formatDuration(totalSeconds: number): string {
   const total = Math.round(totalSeconds);

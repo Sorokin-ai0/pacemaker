@@ -23,6 +23,8 @@ export interface ProfileDTO {
   raceDate: string;
   /** 0 = Sunday … 6 = Saturday */
   longRunDay: number;
+  /** Preview-only (local generator): rest days per non-race week, default 2. */
+  restDaysPerWeek?: 1 | 2;
 }
 
 export interface PlannedWorkoutDTO {
@@ -65,6 +67,8 @@ export interface OnboardingBody {
   currentWeeklyMileageKm: number;
   raceDate: string;
   longRunDay: number;
+  /** Preview-only knob (local generator): rest days per week, default 2. */
+  restDaysPerWeek?: 1 | 2;
 }
 
 export type RegenerateBody = Partial<OnboardingBody>;
